@@ -2,21 +2,24 @@
 
 ## ✅ Fait
 
-- Initialisation du projet (npm, TypeScript, Express, Prisma, Git)
-- Arborescence `src/` créée
-- Connexion Neon + `DATABASE_URL` configurée
-- Schéma Prisma V1 écrit et validé (User, Application, InterviewStep, PreparationTask, Skill)
-- Migration initiale appliquée sur Neon (`20260608170351_init`)
-- Downgrade Prisma v7 → v5 (v7 incompatible avec config classique)
+- ...
+- Schéma Prisma V1 + migration Neon
+- src/config/prisma.ts (singleton client)
+- tsconfig.json + scripts npm (dev/build/start)
+- src/app.ts (Express + cors + cookieParser)
+- src/server.ts (point d'entrée, port 4000)
 
 ## 🔄 En cours
 
-- Setup client Prisma (`src/config/prisma.ts`)
+- Auth (register, login, JWT, middleware)
 
 ## ⏭️ Prochaine étape
 
-- `src/config/prisma.ts` — singleton Prisma Client
-- Auth (register, login, JWT, middleware)
+- src/validators/auth.validator.ts
+- src/services/auth.service.ts
+- src/controllers/auth.controller.ts
+- src/routes/auth.routes.ts
+- src/middlewares/auth.middleware.ts
 
 ## Décisions importantes
 
