@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+enum ApplicationStatus {
+  TARGETED
+  APPLIED
+  INTERVIEWING
+  OFFER
+  REJECTED
+}
+
+enum InterviewStepStatus {
+  PLANNED
+  COMPLETED
+  CANCELLED
+}
+
+enum InterviewStepType {
+  HR
+  TECHNICAL
+  FINAL
+  CUSTOM
+}
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String?
+  avatarUrl    String?
+  passwordHash String?
+  googleId     String? @unique
+
+  defaultInterviewSteps Json @default("[\"HR\", \"TECHNICAL\", \"FINAL\"]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications Application[]
+  skills       Skill[]
+}
+
+model Application {
+  id              String            @id @default(cuid())
+  company         String
+  position        String
+  source          String?
+  offerUrl        String?
+  status          ApplicationStatus @default(TARGETED)
+  appliedAt       DateTime?
+  resumeText      String?
+  coverLetterText String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  interviewSteps   InterviewStep[]
+  preparationTasks PreparationTask[]
+}
+model InterviewStep {
+  id     String              @id @default(cuid())
+  title  String
+  type   InterviewStepType
+  status InterviewStepStatus @default(PLANNED)
+  order  Int
+
+  scheduledAt DateTime?
+  completedAt DateTime?
+
+  questionsAsked String?
+  blockers       String?
+  toReview       String?
+  notes          String?
+
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  skills Skill[]
+}
+
+model PreparationTask {
+  id          String  @id @default(cuid())
+  title       String
+  description String?
+  link        String?
+  isCompleted Boolean @default(false)
+  order       Int
+
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  skillId String?
+  skill   Skill?  @relation(fields: [skillId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Skill {
+  id   String @id @default(cuid())
+  name String
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  interviewSteps   InterviewStep[]
+  preparationTasks PreparationTask[]
+}
