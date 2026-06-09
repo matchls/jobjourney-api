@@ -28,17 +28,18 @@
 - `src/controllers/interview-step.controller.ts`
 - `src/routes/interview-step.routes.ts`
 - CRUD InterviewSteps complet et testé (GET, POST, PATCH, DELETE)
+- CRUD PreparationTasks complet et testé
 
 ## 🔄 En cours
 
-- CRUD PreparationTasks
+- Frontend (jobjourney-web)
 
 ## ⏭️ Prochaine étape
 
-- `src/validators/preparation-task.validator.ts`
-- `src/services/preparation-task.service.ts`
-- `src/controllers/preparation-task.controller.ts`
-- `src/routes/preparation-task.routes.ts`
+- Setup shadcn/ui
+- Setup TanStack Query
+- Layout + navigation
+- Page Kanban
 
 ## Décisions importantes
 
