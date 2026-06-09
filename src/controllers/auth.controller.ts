@@ -5,6 +5,8 @@ import {
   loginUser,
   generateToken,
 } from "../services/auth.service";
+import prisma from "../config/prisma";
+import { AuthRequest } from "../middlewares/auth.middleware";
 
 export const register = async (req: Request, res: Response) => {
   const parsed = registerSchema.safeParse(req.body);
@@ -67,4 +69,29 @@ export const login = async (req: Request, res: Response) => {
 export const logout = (_req: Request, res: Response) => {
   res.clearCookie("token");
   res.status(200).json({ message: "Logged out" });
+};
+
+export const getMe = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        avatarUrl: true,
+        defaultInterviewSteps: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    res.status(200).json(user);
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
 };
