@@ -23,17 +23,22 @@
 - `src/controllers/application.controller.ts`
 - `src/routes/application.routes.ts`
 - CRUD Applications complet et testé (GET, POST, PATCH, DELETE)
-
-## 🔄 En cours
-
-- CRUD InterviewSteps
-
-## ⏭️ Prochaine étape
-
 - `src/validators/interview-step.validator.ts`
 - `src/services/interview-step.service.ts`
 - `src/controllers/interview-step.controller.ts`
 - `src/routes/interview-step.routes.ts`
+- CRUD InterviewSteps complet et testé (GET, POST, PATCH, DELETE)
+
+## 🔄 En cours
+
+- CRUD PreparationTasks
+
+## ⏭️ Prochaine étape
+
+- `src/validators/preparation-task.validator.ts`
+- `src/services/preparation-task.service.ts`
+- `src/controllers/preparation-task.controller.ts`
+- `src/routes/preparation-task.routes.ts`
 
 ## Décisions importantes
 
