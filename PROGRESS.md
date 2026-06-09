@@ -3,23 +3,23 @@
 ## ✅ Fait
 
 - ...
-- Schéma Prisma V1 + migration Neon
-- src/config/prisma.ts (singleton client)
-- tsconfig.json + scripts npm (dev/build/start)
-- src/app.ts (Express + cors + cookieParser)
-- src/server.ts (point d'entrée, port 4000)
-
-## 🔄 En cours
-
-- Auth (register, login, JWT, middleware)
-
-## ⏭️ Prochaine étape
-
 - src/validators/auth.validator.ts
 - src/services/auth.service.ts
 - src/controllers/auth.controller.ts
 - src/routes/auth.routes.ts
 - src/middlewares/auth.middleware.ts
+- Auth testée et fonctionnelle (register, login, logout)
+
+## 🔄 En cours
+
+- CRUD Applications
+
+## ⏭️ Prochaine étape
+
+- src/validators/application.validator.ts
+- src/services/application.service.ts
+- src/controllers/application.controller.ts
+- src/routes/application.routes.ts
 
 ## Décisions importantes
 
