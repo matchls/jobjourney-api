@@ -10,25 +10,14 @@
 - Downgrade Prisma v7 → v5 (v7 incompatible avec config classique)
 - `src/config/prisma.ts` (singleton client)
 - `tsconfig.json` + scripts npm (dev/build/start)
-- `src/app.ts` (Express + cors + cookieParser)
+- `src/app.ts` (Express + cors + cookieParser + error handler global)
 - `src/server.ts` (point d'entrée, port 4000)
-- `src/validators/auth.validator.ts`
-- `src/services/auth.service.ts`
-- `src/controllers/auth.controller.ts`
-- `src/routes/auth.routes.ts`
-- `src/middlewares/auth.middleware.ts`
-- Auth testée et fonctionnelle (register, login, logout)
-- `src/validators/application.validator.ts`
-- `src/services/application.service.ts`
-- `src/controllers/application.controller.ts`
-- `src/routes/application.routes.ts`
-- CRUD Applications complet et testé (GET, POST, PATCH, DELETE)
-- `src/validators/interview-step.validator.ts`
-- `src/services/interview-step.service.ts`
-- `src/controllers/interview-step.controller.ts`
-- `src/routes/interview-step.routes.ts`
-- CRUD InterviewSteps complet et testé (GET, POST, PATCH, DELETE)
-- CRUD PreparationTasks complet et testé
+- Auth complète : register, login, logout, GET /auth/me
+- CRUD Applications complet et testé
+- CRUD InterviewSteps complet et testé (nested sous /applications/:id)
+- CRUD PreparationTasks complet et testé (nested sous /applications/:id)
+- GET + PATCH /users/me (profil utilisateur)
+- Backend V1 complet ✅
 
 ## 🔄 En cours
 
@@ -38,7 +27,7 @@
 
 - Setup shadcn/ui
 - Setup TanStack Query
-- Layout + navigation
+- Layout + navigation (sidebar)
 - Page Kanban
 
 ## Décisions importantes
