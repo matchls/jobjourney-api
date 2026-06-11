@@ -18,6 +18,7 @@
 - CRUD PreparationTasks complet et testé (nested sous /applications/:id)
 - GET + PATCH /users/me (profil utilisateur)
 - Backend V1 complet ✅
+- `GET /dashboard` — stats candidatures + prochains entretiens (BFF endpoint)
 
 ## 🔄 En cours
 
