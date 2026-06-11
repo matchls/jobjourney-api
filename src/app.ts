@@ -6,6 +6,7 @@ import applicationRoutes from "./routes/application.routes";
 import interviewStepRoutes from "./routes/interview-step.routes";
 import preparationTaskRoutes from "./routes/preparation-task.routes";
 import userRoutes from "./routes/user.routes";
+import dashboardRoutes from "./routes/dashboard.routes";
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use("/applications", applicationRoutes);
 app.use("/applications/:id/interview-steps", interviewStepRoutes);
 app.use("/applications/:id/preparation-tasks", preparationTaskRoutes);
 app.use("/users", userRoutes);
+app.use("/dashboard", dashboardRoutes);
 
 app.use(
   (
