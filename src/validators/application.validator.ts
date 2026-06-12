@@ -8,6 +8,9 @@ export const createApplicationSchema = z.object({
   appliedAt: z.string().datetime().optional(),
   resumeText: z.string().optional(),
   coverLetterText: z.string().optional(),
+  status: z
+    .enum(["TARGETED", "APPLIED", "INTERVIEWING", "OFFER", "REJECTED"])
+    .optional(),
 });
 
 export const updateApplicationSchema = createApplicationSchema
