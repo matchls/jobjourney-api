@@ -11,6 +11,7 @@ export const createApplicationSchema = z.object({
   status: z
     .enum(["TARGETED", "APPLIED", "INTERVIEWING", "OFFER", "REJECTED"])
     .optional(),
+  notes: z.string().optional(),
 });
 
 export const updateApplicationSchema = createApplicationSchema
