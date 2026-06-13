@@ -54,6 +54,7 @@ model Application {
   appliedAt       DateTime?
   resumeText      String?
   coverLetterText String?
+notes           String?   
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
