@@ -52,6 +52,7 @@ model Application {
   offerUrl        String?
   status          ApplicationStatus @default(TARGETED)
   appliedAt       DateTime?
+  statusChangedAt DateTime?
   resumeText      String?
   coverLetterText String?
 notes           String?   
@@ -64,7 +65,21 @@ notes           String?
 
   interviewSteps   InterviewStep[]
   preparationTasks PreparationTask[]
+  statusHistory    ApplicationStatusHistory[]
 }
+
+model ApplicationStatusHistory {
+  id         String             @id @default(cuid())
+  fromStatus ApplicationStatus?
+  toStatus   ApplicationStatus
+
+  changedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
 model InterviewStep {
   id     String              @id @default(cuid())
   title  String

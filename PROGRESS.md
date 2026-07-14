@@ -19,6 +19,13 @@
 - GET + PATCH /users/me (profil utilisateur)
 - Backend V1 complet ✅
 - `GET /dashboard` — stats candidatures + prochains entretiens (BFF endpoint)
+- Historisation des statuts de candidature :
+  - `statusChangedAt` (DateTime?) ajouté sur `Application`
+  - Table `ApplicationStatusHistory` (fromStatus, toStatus, changedAt, createdAt)
+  - Migration `20260714164748_add_status_history`
+  - `createApplication` initialise `statusChangedAt`
+  - `updateApplication` : détecte un changement de statut, met à jour `statusChangedAt` et crée une entrée d'historique dans une transaction Prisma (`$transaction`) — pas d'historique créé si le statut ne change pas
+  - `getApplicationById` retourne `statusHistory` (trié du plus ancien au plus récent)
 
 ## 🔄 En cours
 
@@ -41,3 +48,4 @@
 - Auth : JWT dans cookie httpOnly, pas de librairie externe (fait main)
 - Base de données : PostgreSQL/Prisma/Neon (PAS MongoDB — Notion mis à jour)
 - Google OAuth → reporté en V1.1
+- Pas d'entrée d'historique créée à la création d'une candidature (seulement lors d'un changement de statut) — le champ `fromStatus` reste nullable en DB pour rester safe, mais n'est jamais `null` en pratique avec ce flux

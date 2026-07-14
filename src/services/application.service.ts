@@ -17,6 +17,7 @@ export const getApplicationById = async (id: string, userId: string) => {
     include: {
       interviewSteps: { orderBy: { order: "asc" } },
       preparationTasks: { orderBy: { order: "asc" } },
+      statusHistory: { orderBy: { changedAt: "asc" } },
     },
   });
 
@@ -32,7 +33,7 @@ export const createApplication = async (
   data: CreateApplicationInput,
 ) => {
   return prisma.application.create({
-    data: { ...data, userId },
+    data: { ...data, userId, statusChangedAt: new Date() },
   });
 };
 
@@ -47,10 +48,28 @@ export const updateApplication = async (
     throw new Error("NOT_FOUND");
   }
 
-  return prisma.application.update({
-    where: { id },
-    data,
-  });
+  const statusChanged =
+    data.status !== undefined && data.status !== application.status;
+
+  if (!statusChanged) {
+    return prisma.application.update({ where: { id }, data });
+  }
+
+  const [updated] = await prisma.$transaction([
+    prisma.application.update({
+      where: { id },
+      data: { ...data, statusChangedAt: new Date() },
+    }),
+    prisma.applicationStatusHistory.create({
+      data: {
+        applicationId: id,
+        fromStatus: application.status,
+        toStatus: data.status!,
+      },
+    }),
+  ]);
+
+  return updated;
 };
 
 export const deleteApplication = async (id: string, userId: string) => {
