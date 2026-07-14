@@ -12,6 +12,13 @@ export const createApplicationSchema = z.object({
     .enum(["TARGETED", "APPLIED", "INTERVIEWING", "OFFER", "REJECTED"])
     .optional(),
   notes: z.string().optional(),
+  location: z.string().optional(),
+  salary: z.string().optional(),
+  jobDescription: z.string().optional(),
+  contactName: z.string().optional(),
+  contactRole: z.string().optional(),
+  contactEmail: z.string().email().optional(),
+  referralNote: z.string().optional(),
 });
 
 export const updateApplicationSchema = createApplicationSchema

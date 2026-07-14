@@ -6,6 +6,7 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 enum ApplicationStatus {
   TARGETED
   APPLIED
@@ -55,7 +56,15 @@ model Application {
   statusChangedAt DateTime?
   resumeText      String?
   coverLetterText String?
-notes           String?   
+  notes           String?
+
+  location       String?
+  salary         String?
+  jobDescription String?
+  contactName    String?
+  contactRole    String?
+  contactEmail   String?
+  referralNote   String?
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)

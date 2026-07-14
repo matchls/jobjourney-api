@@ -57,9 +57,19 @@ export const updateInterviewStep = async (
     throw new Error("NOT_FOUND");
   }
 
+  let completedAt: Date | string | null | undefined = data.completedAt;
+
+  if (completedAt === undefined && data.status !== undefined) {
+    if (data.status === "COMPLETED" && step.status !== "COMPLETED") {
+      completedAt = new Date();
+    } else if (data.status !== "COMPLETED" && step.status === "COMPLETED") {
+      completedAt = null;
+    }
+  }
+
   return prisma.interviewStep.update({
     where: { id: stepId },
-    data,
+    data: { ...data, ...(completedAt !== undefined ? { completedAt } : {}) },
   });
 };
 
