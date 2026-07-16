@@ -2,7 +2,6 @@
 
 ## Règles de collaboration
 
-- **Ne crée rien sans demande explicite.** C'est le développeur qui code. Tu guides pas à pas : tu dis quoi créer, quoi écrire, quoi modifier — le développeur exécute.
 - Avance fichier par fichier. Si un fichier est long, décompose-le en morceaux et explique chaque partie.
 - Explique le pourquoi de chaque décision avant que le développeur écrive la moindre ligne.
 - Pour chaque fichier : expliquer son rôle dans l'architecture ET sa logique de construction (comment il est organisé, dans quel ordre ça s'exécute) — sans décortiquer ligne par ligne, mais en donnant la vision d'ensemble avant les points clés.
