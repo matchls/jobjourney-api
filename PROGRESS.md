@@ -32,6 +32,7 @@
   - `PreparationTask` : `skillId` existant désormais vérifié (appartenance à l'utilisateur) en création/modification, renvoie `skill`
   - `getApplicationById` inclut `skills` sur les étapes d'entretien et `skill` sur les tâches de préparation
   - Vérification d'appartenance centralisée (`verifySkillOwnership` dans `skill.service.ts`) réutilisée par interview-steps et preparation-tasks — erreur `INVALID_SKILLS` → 400
+  - `PATCH` preparation-task accepte `skillId: null` pour détacher une compétence liée
 
 ## 🔄 En cours
 
@@ -56,7 +57,4 @@
 - Google OAuth → reporté en V1.1
 - Pas d'entrée d'historique créée à la création d'une candidature (seulement lors d'un changement de statut) — le champ `fromStatus` reste nullable en DB pour rester safe, mais n'est jamais `null` en pratique avec ce flux
 - Skills : pas de nouvelle migration Prisma nécessaire, le modèle `Skill` et ses relations existaient déjà dans le schéma avant que le code applicatif ne les utilise
-
-## ⚠️ Problème connu (préexistant, hors scope skills)
-
-- `npx tsc --noEmit` et `npm run build` échouent sur `src/app.ts` (incompatibilité de types entre `cors@2.8.6` et les overloads Express 5 sur `app.use(cors(...))`). Reproduit à l'identique sur `main` avant la feature skills — à traiter séparément (upgrade `@types/cors` ou cast ciblé).
+- `src/app.ts` : incompatibilité de types entre `cors@2.8.6` et les overloads Express 5 sur `app.use(cors(...))` (préexistante, reproduite sur `main`) — corrigée par un cast ciblé `cors(...) as unknown as express.RequestHandler` (contournement documenté pour ce mismatch de typings, sans impact runtime)
