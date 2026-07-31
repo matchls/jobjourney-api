@@ -14,7 +14,7 @@ export const updatePreparationTaskSchema = z.object({
   link: z.string().url().optional(),
   isCompleted: z.boolean().optional(),
   order: z.number().int().min(0).optional(),
-  skillId: z.string().optional(),
+  skillId: z.string().nullable().optional(),
 });
 
 export type CreatePreparationTaskInput = z.infer<
