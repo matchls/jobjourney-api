@@ -38,7 +38,11 @@ export const createPreparationTask = async (
       parsed.data,
     );
     res.status(201).json(task);
-  } catch {
+  } catch (error: any) {
+    if (error.message === "INVALID_SKILLS") {
+      res.status(400).json({ error: "Invalid skill" });
+      return;
+    }
     res.status(404).json({ error: "Application not found" });
   }
 };
@@ -62,7 +66,11 @@ export const updatePreparationTask = async (
       parsed.data,
     );
     res.status(200).json(task);
-  } catch {
+  } catch (error: any) {
+    if (error.message === "INVALID_SKILLS") {
+      res.status(400).json({ error: "Invalid skill" });
+      return;
+    }
     res.status(404).json({ error: "Preparation task not found" });
   }
 };

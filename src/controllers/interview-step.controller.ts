@@ -35,7 +35,11 @@ export const createInterviewStep = async (req: AuthRequest, res: Response) => {
       parsed.data,
     );
     res.status(201).json(step);
-  } catch {
+  } catch (error: any) {
+    if (error.message === "INVALID_SKILLS") {
+      res.status(400).json({ error: "One or more skills are invalid" });
+      return;
+    }
     res.status(404).json({ error: "Application not found" });
   }
 };
@@ -56,7 +60,11 @@ export const updateInterviewStep = async (req: AuthRequest, res: Response) => {
       parsed.data,
     );
     res.status(200).json(step);
-  } catch {
+  } catch (error: any) {
+    if (error.message === "INVALID_SKILLS") {
+      res.status(400).json({ error: "One or more skills are invalid" });
+      return;
+    }
     res.status(404).json({ error: "Interview step not found" });
   }
 };

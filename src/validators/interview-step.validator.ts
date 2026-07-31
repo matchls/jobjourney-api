@@ -5,6 +5,7 @@ export const createInterviewStepSchema = z.object({
   type: z.enum(["HR", "TECHNICAL", "FINAL", "CUSTOM"]),
   scheduledAt: z.string().datetime().optional(),
   order: z.number().int().min(0),
+  skillIds: z.array(z.string()).optional(),
 });
 
 export const updateInterviewStepSchema = z.object({
@@ -18,6 +19,7 @@ export const updateInterviewStepSchema = z.object({
   toReview: z.string().optional(),
   notes: z.string().optional(),
   order: z.number().int().min(0).optional(),
+  skillIds: z.array(z.string()).optional(),
 });
 
 export type CreateInterviewStepInput = z.infer<

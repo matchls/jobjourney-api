@@ -3,6 +3,7 @@ import {
   CreateInterviewStepInput,
   UpdateInterviewStepInput,
 } from "../validators/interview-step.validator";
+import { verifySkillOwnership } from "./skill.service";
 
 const verifyApplicationOwnership = async (
   applicationId: string,
@@ -28,6 +29,7 @@ export const getInterviewSteps = async (
   return prisma.interviewStep.findMany({
     where: { applicationId },
     orderBy: { order: "asc" },
+    include: { skills: true },
   });
 };
 
@@ -38,8 +40,19 @@ export const createInterviewStep = async (
 ) => {
   await verifyApplicationOwnership(applicationId, userId);
 
+  const { skillIds, ...rest } = data;
+
+  if (skillIds) {
+    await verifySkillOwnership(skillIds, userId);
+  }
+
   return prisma.interviewStep.create({
-    data: { ...data, applicationId },
+    data: {
+      ...rest,
+      applicationId,
+      ...(skillIds ? { skills: { connect: skillIds.map((id) => ({ id })) } } : {}),
+    },
+    include: { skills: true },
   });
 };
 
@@ -57,19 +70,30 @@ export const updateInterviewStep = async (
     throw new Error("NOT_FOUND");
   }
 
-  let completedAt: Date | string | null | undefined = data.completedAt;
+  const { skillIds, ...rest } = data;
 
-  if (completedAt === undefined && data.status !== undefined) {
-    if (data.status === "COMPLETED" && step.status !== "COMPLETED") {
+  if (skillIds) {
+    await verifySkillOwnership(skillIds, userId);
+  }
+
+  let completedAt: Date | string | null | undefined = rest.completedAt;
+
+  if (completedAt === undefined && rest.status !== undefined) {
+    if (rest.status === "COMPLETED" && step.status !== "COMPLETED") {
       completedAt = new Date();
-    } else if (data.status !== "COMPLETED" && step.status === "COMPLETED") {
+    } else if (rest.status !== "COMPLETED" && step.status === "COMPLETED") {
       completedAt = null;
     }
   }
 
   return prisma.interviewStep.update({
     where: { id: stepId },
-    data: { ...data, ...(completedAt !== undefined ? { completedAt } : {}) },
+    data: {
+      ...rest,
+      ...(completedAt !== undefined ? { completedAt } : {}),
+      ...(skillIds ? { skills: { set: skillIds.map((id) => ({ id })) } } : {}),
+    },
+    include: { skills: true },
   });
 };
 

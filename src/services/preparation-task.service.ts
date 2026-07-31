@@ -3,6 +3,7 @@ import {
   CreatePreparationTaskInput,
   UpdatePreparationTaskInput,
 } from "../validators/preparation-task.validator";
+import { verifySkillOwnership } from "./skill.service";
 
 const verifyApplicationOwnership = async (
   applicationId: string,
@@ -28,6 +29,7 @@ export const getPreparationTasks = async (
   return prisma.preparationTask.findMany({
     where: { applicationId },
     orderBy: { order: "asc" },
+    include: { skill: true },
   });
 };
 
@@ -38,8 +40,13 @@ export const createPreparationTask = async (
 ) => {
   await verifyApplicationOwnership(applicationId, userId);
 
+  if (data.skillId) {
+    await verifySkillOwnership([data.skillId], userId);
+  }
+
   return prisma.preparationTask.create({
     data: { ...data, applicationId },
+    include: { skill: true },
   });
 };
 
@@ -57,9 +64,14 @@ export const updatePreparationTask = async (
     throw new Error("NOT_FOUND");
   }
 
+  if (data.skillId) {
+    await verifySkillOwnership([data.skillId], userId);
+  }
+
   return prisma.preparationTask.update({
     where: { id: taskId },
     data,
+    include: { skill: true },
   });
 };
 
