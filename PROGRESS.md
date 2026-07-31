@@ -26,6 +26,13 @@
   - `createApplication` initialise `statusChangedAt`
   - `updateApplication` : détecte un changement de statut, met à jour `statusChangedAt` et crée une entrée d'historique dans une transaction Prisma (`$transaction`) — pas d'historique créé si le statut ne change pas
   - `getApplicationById` retourne `statusHistory` (trié du plus ancien au plus récent)
+- API Skills (débloque jobjourney-web#9) :
+  - CRUD complet `GET/POST/PATCH/DELETE /skills`, scopé par `userId`
+  - `InterviewStep` accepte `skillIds?: string[]` en création/modification (`connect` en création, `set` en modification), renvoie `skills`
+  - `PreparationTask` : `skillId` existant désormais vérifié (appartenance à l'utilisateur) en création/modification, renvoie `skill`
+  - `getApplicationById` inclut `skills` sur les étapes d'entretien et `skill` sur les tâches de préparation
+  - Vérification d'appartenance centralisée (`verifySkillOwnership` dans `skill.service.ts`) réutilisée par interview-steps et preparation-tasks — erreur `INVALID_SKILLS` → 400
+  - `PATCH` preparation-task accepte `skillId: null` pour détacher une compétence liée
 
 ## 🔄 En cours
 
@@ -49,3 +56,5 @@
 - Base de données : PostgreSQL/Prisma/Neon (PAS MongoDB — Notion mis à jour)
 - Google OAuth → reporté en V1.1
 - Pas d'entrée d'historique créée à la création d'une candidature (seulement lors d'un changement de statut) — le champ `fromStatus` reste nullable en DB pour rester safe, mais n'est jamais `null` en pratique avec ce flux
+- Skills : pas de nouvelle migration Prisma nécessaire, le modèle `Skill` et ses relations existaient déjà dans le schéma avant que le code applicatif ne les utilise
+- `src/app.ts` : incompatibilité de types entre `cors@2.8.6` et les overloads Express 5 sur `app.use(cors(...))` (préexistante, reproduite sur `main`) — corrigée par un cast ciblé `cors(...) as unknown as express.RequestHandler` (contournement documenté pour ce mismatch de typings, sans impact runtime)

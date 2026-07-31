@@ -15,8 +15,14 @@ export const getApplicationById = async (id: string, userId: string) => {
   const application = await prisma.application.findUnique({
     where: { id },
     include: {
-      interviewSteps: { orderBy: { order: "asc" } },
-      preparationTasks: { orderBy: { order: "asc" } },
+      interviewSteps: {
+        orderBy: { order: "asc" },
+        include: { skills: true },
+      },
+      preparationTasks: {
+        orderBy: { order: "asc" },
+        include: { skill: true },
+      },
       statusHistory: { orderBy: { changedAt: "asc" } },
     },
   });

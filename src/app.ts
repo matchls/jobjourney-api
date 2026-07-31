@@ -7,6 +7,7 @@ import interviewStepRoutes from "./routes/interview-step.routes";
 import preparationTaskRoutes from "./routes/preparation-task.routes";
 import userRoutes from "./routes/user.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
+import skillRoutes from "./routes/skill.routes";
 
 const app = express();
 
@@ -14,7 +15,7 @@ app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:3000",
     credentials: true,
-  }),
+  }) as unknown as express.RequestHandler,
 );
 app.use(express.json());
 app.use(cookieParser());
@@ -24,6 +25,7 @@ app.use("/applications/:id/interview-steps", interviewStepRoutes);
 app.use("/applications/:id/preparation-tasks", preparationTaskRoutes);
 app.use("/users", userRoutes);
 app.use("/dashboard", dashboardRoutes);
+app.use("/skills", skillRoutes);
 
 app.use(
   (
