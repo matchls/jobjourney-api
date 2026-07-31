@@ -8,6 +8,7 @@ import preparationTaskRoutes from "./routes/preparation-task.routes";
 import userRoutes from "./routes/user.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 import skillRoutes from "./routes/skill.routes";
+import progressionRoutes from "./routes/progression.routes";
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use("/applications/:id/preparation-tasks", preparationTaskRoutes);
 app.use("/users", userRoutes);
 app.use("/dashboard", dashboardRoutes);
 app.use("/skills", skillRoutes);
+app.use("/progression", progressionRoutes);
 
 app.use(
   (
