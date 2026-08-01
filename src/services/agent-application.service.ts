@@ -2,6 +2,7 @@ import { Prisma, AgentImportReceiptResult } from "@prisma/client";
 import prisma from "../config/prisma";
 import { CreateAgentApplicationInput } from "../validators/agent-application.validator";
 import { computeAgentDedupKey, computeRequestHash } from "../utils/agent-dedup";
+import { findApplicationMatchingDedupKey } from "./application-dedup-lookup.service";
 
 export interface AgentImportContext {
   userId: string;
@@ -175,14 +176,11 @@ export const importAgentApplication = async (
         return outcome;
       }
 
-      const existingApplication = await tx.application.findUnique({
-        where: {
-          userId_agentDedupKey: {
-            userId: context.userId,
-            agentDedupKey: dedupKey,
-          },
-        },
-      });
+      const existingApplication = await findApplicationMatchingDedupKey(
+        tx,
+        context.userId,
+        dedupKey,
+      );
 
       if (existingApplication) {
         await tx.agentImportReceipt.create({

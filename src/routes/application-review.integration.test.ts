@@ -3,6 +3,24 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import app from "../app";
 import prisma from "../config/prisma";
+import { computeAgentDedupKey } from "../utils/agent-dedup";
+import { generateAgentApiKey } from "../services/agent-api-key.service";
+
+const AGENT_SCOPE = "applications:create";
+
+const createAgentApiKey = async (targetUserId: string) => {
+  const generated = generateAgentApiKey();
+  await prisma.agentApiKey.create({
+    data: {
+      userId: targetUserId,
+      name: "review test key",
+      prefix: generated.prefix,
+      secretHash: generated.secretHash,
+      scopes: [AGENT_SCOPE],
+    },
+  });
+  return generated.fullKey;
+};
 
 // Covers: (1) confirmImportReview on the existing PATCH /applications/:id
 // endpoint (web#14), and (2) a sanity check that classic email auth still
@@ -22,8 +40,21 @@ const extractCookie = (res: Response): string => {
   return setCookie!.split(";")[0];
 };
 
+const postAgentApplication = (fullKey: string, body: unknown, idempotencyKey: string) =>
+  fetch(`${baseUrl}/agent/applications`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${fullKey}`,
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify(body),
+  });
+
 describe("PATCH /applications/:id — confirmImportReview", () => {
   before(async () => {
+    process.env.AGENT_API_KEY_PEPPER = "review-test-pepper-not-real";
+
     server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, resolve));
     const address = server.address();
@@ -115,5 +146,115 @@ describe("PATCH /applications/:id — confirmImportReview", () => {
     assert.equal(updated!.agentImportMetadata, null);
     assert.equal(updated!.importedByApiKeyId, null);
     assert.equal(updated!.agentDedupKey, null);
+  });
+
+  test("returns 404 for an application that does not exist", async () => {
+    const res = await fetch(`${baseUrl}/applications/does-not-exist`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ contractType: "CDI" }),
+    });
+    assert.equal(res.status, 404);
+  });
+
+  test("corrects contractType and confirms review in the same PATCH request", async () => {
+    const imported = await prisma.application.create({
+      data: {
+        company: "Contract Co",
+        position: "Engineer",
+        userId,
+        creationSource: "AGENT_IMPORT",
+        importReviewStatus: "PENDING",
+        uncertainFields: ["contractType"],
+        agentDedupKey: computeAgentDedupKey({ company: "Contract Co", position: "Engineer" }),
+      },
+    });
+
+    const res = await fetch(`${baseUrl}/applications/${imported.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ contractType: "CDI", confirmImportReview: true }),
+    });
+    assert.equal(res.status, 200);
+
+    const updated = await prisma.application.findUnique({ where: { id: imported.id } });
+    assert.equal(updated!.contractType, "CDI");
+    assert.equal(updated!.importReviewStatus, "REVIEWED");
+    assert.ok(updated!.reviewedAt);
+  });
+
+  test("correcting an offerUrl updates the fingerprint so a later agent import of it is detected as a duplicate", async () => {
+    const imported = await prisma.application.create({
+      data: {
+        company: "URL Fix Co",
+        position: "Engineer",
+        userId,
+        creationSource: "AGENT_IMPORT",
+        importReviewStatus: "NOT_REQUIRED",
+        agentDedupKey: computeAgentDedupKey({ company: "URL Fix Co", position: "Engineer" }),
+      },
+    });
+
+    const correctedUrl = `https://example.com/jobs/url-fix-co-${TEST_RUN_ID}`;
+    const patchRes = await fetch(`${baseUrl}/applications/${imported.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ offerUrl: correctedUrl }),
+    });
+    assert.equal(patchRes.status, 200);
+
+    const afterPatch = await prisma.application.findUnique({ where: { id: imported.id } });
+    assert.equal(
+      afterPatch!.agentDedupKey,
+      computeAgentDedupKey({ offerUrl: correctedUrl, company: "URL Fix Co", position: "Engineer" }),
+    );
+
+    const fullKey = await createAgentApiKey(userId);
+    const importRes = await postAgentApplication(
+      fullKey,
+      { company: "URL Fix Co", position: "Engineer", offerUrl: correctedUrl },
+      "url-fix-import-1",
+    );
+    assert.equal(importRes.status, 200);
+    const importBody = await importRes.json();
+    assert.equal(importBody.status, "duplicate");
+    assert.equal(importBody.applicationId, imported.id);
+  });
+
+  test("correcting to a fingerprint that matches another application returns 409 and changes nothing", async () => {
+    const existing = await prisma.application.create({
+      data: {
+        company: "Existing Target Co",
+        position: "Engineer",
+        userId,
+        creationSource: "AGENT_IMPORT",
+        importReviewStatus: "NOT_REQUIRED",
+        agentDedupKey: computeAgentDedupKey({ company: "Existing Target Co", position: "Engineer" }),
+      },
+    });
+
+    const beingEdited = await prisma.application.create({
+      data: {
+        company: "Being Edited Co",
+        position: "Engineer",
+        userId,
+        creationSource: "AGENT_IMPORT",
+        importReviewStatus: "NOT_REQUIRED",
+        agentDedupKey: computeAgentDedupKey({ company: "Being Edited Co", position: "Engineer" }),
+      },
+    });
+
+    const res = await fetch(`${baseUrl}/applications/${beingEdited.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ company: "Existing Target Co" }),
+    });
+    assert.equal(res.status, 409);
+    const body = await res.json();
+    assert.equal(body.error.code, "application_duplicate");
+
+    const unchanged = await prisma.application.findUnique({ where: { id: beingEdited.id } });
+    assert.equal(unchanged!.company, "Being Edited Co");
+    assert.notEqual(unchanged!.agentDedupKey, existing.agentDedupKey);
   });
 });

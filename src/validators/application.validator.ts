@@ -24,6 +24,7 @@ export const createApplicationSchema = z.object({
     .optional(),
   notes: z.string().optional(),
   location: z.string().optional(),
+  contractType: z.string().optional(),
   salary: z.string().optional(),
   jobDescription: z.string().optional(),
   contactName: z.string().optional(),

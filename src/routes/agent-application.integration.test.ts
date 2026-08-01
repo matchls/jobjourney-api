@@ -314,4 +314,160 @@ describe("POST /agent/applications", () => {
       assert.equal(line.includes(apiKey.secretHash), false);
     }
   });
+
+  test("returns a uniform 503 when AGENT_API_KEY_PEPPER is missing, regardless of the request", async () => {
+    // Created while the pepper is still set, so this is a real, existing
+    // prefix by the time we remove it below.
+    const { fullKey } = await createApiKey();
+    const neverStored = generateAgentApiKey().fullKey;
+
+    const savedPepper = process.env.AGENT_API_KEY_PEPPER;
+    delete process.env.AGENT_API_KEY_PEPPER;
+
+    try {
+      const noHeader = await fetch(`${baseUrl}/agent/applications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company: "Acme", position: "Engineer" }),
+      });
+      const malformedKey = await postApplication(
+        "not-a-real-key",
+        { company: "Acme", position: "Engineer" },
+        "cfg-1",
+      );
+      const unknownPrefix = await postApplication(
+        neverStored,
+        { company: "Acme", position: "Engineer" },
+        "cfg-2",
+      );
+      const existingPrefix = await postApplication(
+        fullKey,
+        { company: "Acme", position: "Engineer" },
+        "cfg-3",
+      );
+
+      for (const res of [noHeader, malformedKey, unknownPrefix, existingPrefix]) {
+        assert.equal(res.status, 503);
+        const body = await res.json();
+        assert.deepEqual(body, { error: { code: "agent_config_error" } });
+      }
+    } finally {
+      process.env.AGENT_API_KEY_PEPPER = savedPepper;
+    }
+  });
+
+  test("rejects malformed JSON with 400 invalid_json, not 500", async () => {
+    const { fullKey } = await createApiKey();
+    const res = await fetch(`${baseUrl}/agent/applications`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${fullKey}`,
+        "Idempotency-Key": "bad-json-1",
+      },
+      body: "{ this is not valid json ",
+    });
+
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.error.code, "invalid_json");
+    assert.deepEqual(body.error.fieldErrors, {});
+    assert.ok(Array.isArray(body.error.formErrors));
+  });
+
+  test("rejects a body over ~32kb with 413, not 500", async () => {
+    const { fullKey } = await createApiKey();
+    const oversizedNotes = "x".repeat(40 * 1024);
+
+    const res = await fetch(`${baseUrl}/agent/applications`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${fullKey}`,
+        "Idempotency-Key": "too-big-1",
+      },
+      body: JSON.stringify({ company: "Acme", position: "Engineer", notes: oversizedNotes }),
+    });
+
+    assert.equal(res.status, 413);
+    const body = await res.json();
+    assert.equal(body.error.code, "payload_too_large");
+  });
+
+  test("returns 429 with Retry-After on the 61st request within the rate limit window", async () => {
+    const { fullKey } = await createApiKey();
+
+    let last!: Response;
+    for (let i = 0; i < 61; i += 1) {
+      last = await postApplication(
+        fullKey,
+        { company: `Rate Limit Co ${i}`, position: "Engineer" },
+        `rate-limit-${i}`,
+      );
+      if (i < 60) {
+        assert.notEqual(last.status, 429, `request ${i} should not be rate limited yet`);
+      }
+    }
+
+    assert.equal(last.status, 429);
+    assert.ok(last.headers.get("retry-after"));
+    const body = await last.json();
+    assert.equal(body.error.code, "rate_limited");
+  });
+
+  test("detects a duplicate against a pre-existing MANUAL application with an equivalent URL", async () => {
+    const manual = await prisma.application.create({
+      data: {
+        company: "Manual URL Co",
+        position: "Engineer",
+        userId,
+        offerUrl: "https://example.com/jobs/manual-url-test?utm_source=newsletter",
+      },
+    });
+
+    const { fullKey } = await createApiKey();
+    const res = await postApplication(
+      fullKey,
+      {
+        company: "Manual URL Co",
+        position: "Engineer",
+        offerUrl: "https://example.com/jobs/manual-url-test?gclid=x",
+      },
+      "manual-dup-1",
+    );
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.status, "duplicate");
+    assert.equal(body.applicationId, manual.id);
+
+    const unchanged = await prisma.application.findUnique({ where: { id: manual.id } });
+    assert.equal(unchanged!.creationSource, "MANUAL");
+  });
+
+  test("detects a duplicate against a pre-existing MANUAL application without a URL via the fallback", async () => {
+    const manual = await prisma.application.create({
+      data: {
+        company: "Manual Fallback Co",
+        position: "Backend Engineer",
+        location: "Nantes",
+        userId,
+      },
+    });
+
+    const { fullKey } = await createApiKey();
+    const res = await postApplication(
+      fullKey,
+      { company: " manual fallback co ", position: "BACKEND ENGINEER", location: "nantes" },
+      "manual-dup-2",
+    );
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.status, "duplicate");
+    assert.equal(body.applicationId, manual.id);
+
+    const unchanged = await prisma.application.findUnique({ where: { id: manual.id } });
+    assert.equal(unchanged!.creationSource, "MANUAL");
+  });
 });

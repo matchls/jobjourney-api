@@ -1,8 +1,21 @@
+import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import {
   CreateApplicationInput,
   UpdateApplicationInput,
 } from "../validators/application.validator";
+import { computeAgentDedupKey } from "../utils/agent-dedup";
+import { findApplicationMatchingDedupKey } from "./application-dedup-lookup.service";
+
+export class ApplicationDuplicateError extends Error {
+  constructor() {
+    super("APPLICATION_DUPLICATE");
+  }
+}
+
+const isUniqueConstraintError = (error: unknown): boolean =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  error.code === "P2002";
 
 export const getApplications = async (userId: string) => {
   return prisma.application.findMany({
@@ -64,31 +77,80 @@ export const updateApplication = async (
       ? { importReviewStatus: "REVIEWED" as const, reviewedAt: new Date() }
       : {};
 
+  // A user correcting an agent-imported application's identifying fields
+  // (offerUrl/company/position/location) should keep it in sync with the
+  // same fingerprint the agent-import route uses — otherwise a later import
+  // of the corrected URL would silently create a second application instead
+  // of being recognized as the same one.
+  let dedupUpdate: { agentDedupKey?: string } = {};
+
+  if (application.creationSource === "AGENT_IMPORT") {
+    const touchesFingerprintFields =
+      rest.offerUrl !== undefined ||
+      rest.company !== undefined ||
+      rest.position !== undefined ||
+      rest.location !== undefined;
+
+    if (touchesFingerprintFields) {
+      const newDedupKey = computeAgentDedupKey({
+        offerUrl: rest.offerUrl !== undefined ? rest.offerUrl : application.offerUrl ?? undefined,
+        company: rest.company !== undefined ? rest.company : application.company,
+        position: rest.position !== undefined ? rest.position : application.position,
+        location: rest.location !== undefined ? rest.location : application.location ?? undefined,
+      });
+
+      if (newDedupKey !== application.agentDedupKey) {
+        const conflict = await findApplicationMatchingDedupKey(
+          prisma,
+          userId,
+          newDedupKey,
+          id,
+        );
+
+        if (conflict) {
+          throw new ApplicationDuplicateError();
+        }
+
+        dedupUpdate = { agentDedupKey: newDedupKey };
+      }
+    }
+  }
+
   const statusChanged =
     rest.status !== undefined && rest.status !== application.status;
 
-  if (!statusChanged) {
-    return prisma.application.update({
-      where: { id },
-      data: { ...rest, ...reviewUpdate },
-    });
+  try {
+    if (!statusChanged) {
+      return await prisma.application.update({
+        where: { id },
+        data: { ...rest, ...reviewUpdate, ...dedupUpdate },
+      });
+    }
+
+    const [updated] = await prisma.$transaction([
+      prisma.application.update({
+        where: { id },
+        data: { ...rest, ...reviewUpdate, ...dedupUpdate, statusChangedAt: new Date() },
+      }),
+      prisma.applicationStatusHistory.create({
+        data: {
+          applicationId: id,
+          fromStatus: application.status,
+          toStatus: rest.status!,
+        },
+      }),
+    ]);
+
+    return updated;
+  } catch (error) {
+    // Belt-and-suspenders: a concurrent request could have raced past the
+    // pre-check above and inserted the same fingerprint first. The DB's
+    // @@unique([userId, agentDedupKey]) constraint is the real guarantee.
+    if (dedupUpdate.agentDedupKey && isUniqueConstraintError(error)) {
+      throw new ApplicationDuplicateError();
+    }
+    throw error;
   }
-
-  const [updated] = await prisma.$transaction([
-    prisma.application.update({
-      where: { id },
-      data: { ...rest, ...reviewUpdate, statusChangedAt: new Date() },
-    }),
-    prisma.applicationStatusHistory.create({
-      data: {
-        applicationId: id,
-        fromStatus: application.status,
-        toStatus: rest.status!,
-      },
-    }),
-  ]);
-
-  return updated;
 };
 
 export const deleteApplication = async (id: string, userId: string) => {

@@ -5,6 +5,7 @@ import {
   updateApplicationSchema,
 } from "../validators/application.validator";
 import * as applicationService from "../services/application.service";
+import { ApplicationDuplicateError } from "../services/application.service";
 
 export const getApplications = async (req: AuthRequest, res: Response) => {
   const applications = await applicationService.getApplications(req.userId!);
@@ -47,16 +48,27 @@ export const updateApplication = async (req: AuthRequest, res: Response) => {
     return;
   }
 
+  const id = req.params.id as string;
+
   try {
-    const id = req.params.id as string;
     const application = await applicationService.updateApplication(
       id,
       req.userId!,
       parsed.data,
     );
     res.status(200).json(application);
-  } catch {
-    res.status(404).json({ error: "Application not found" });
+  } catch (error) {
+    if (error instanceof ApplicationDuplicateError) {
+      res.status(409).json({ error: { code: "application_duplicate" } });
+      return;
+    }
+    if (error instanceof Error && error.message === "NOT_FOUND") {
+      res.status(404).json({ error: "Application not found" });
+      return;
+    }
+    // Anything else is unexpected — propagate to the global 500 handler
+    // instead of masking it as a 404.
+    throw error;
   }
 };
 

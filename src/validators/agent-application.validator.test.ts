@@ -107,6 +107,47 @@ describe("createAgentApplicationSchema", () => {
 
     assert.equal(result.success, false);
   });
+
+  test("accepts a normal http(s) offerUrl", () => {
+    const httpsResult = createAgentApplicationSchema.safeParse({
+      company: "Acme",
+      position: "Engineer",
+      offerUrl: "https://example.com/jobs/1",
+    });
+    const httpResult = createAgentApplicationSchema.safeParse({
+      company: "Acme",
+      position: "Engineer",
+      offerUrl: "http://example.com/jobs/1",
+    });
+
+    assert.ok(httpsResult.success);
+    assert.ok(httpResult.success);
+  });
+
+  test("rejects offerUrl with a disallowed protocol", () => {
+    for (const offerUrl of [
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "ftp://example.com/file",
+    ]) {
+      const result = createAgentApplicationSchema.safeParse({
+        company: "Acme",
+        position: "Engineer",
+        offerUrl,
+      });
+      assert.equal(result.success, false, `expected ${offerUrl} to be rejected`);
+    }
+  });
+
+  test("rejects offerUrl containing embedded credentials", () => {
+    const result = createAgentApplicationSchema.safeParse({
+      company: "Acme",
+      position: "Engineer",
+      offerUrl: "https://user:pass@example.com/jobs/1",
+    });
+
+    assert.equal(result.success, false);
+  });
 });
 
 describe("idempotencyKeySchema", () => {

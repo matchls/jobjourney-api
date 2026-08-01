@@ -10,6 +10,7 @@ import dashboardRoutes from "./routes/dashboard.routes";
 import skillRoutes from "./routes/skill.routes";
 import progressionRoutes from "./routes/progression.routes";
 import agentRoutes from "./routes/agent.routes";
+import { requireAgentConfig } from "./middlewares/agent-config.middleware";
 
 const app = express();
 
@@ -19,6 +20,12 @@ app.use(
     credentials: true,
   }) as unknown as express.RequestHandler,
 );
+
+// requireAgentConfig runs before anything else on /agent/* — before JSON
+// parsing, before the Bearer header is read, before any Prisma lookup — so a
+// missing AGENT_API_KEY_PEPPER always yields the exact same 503 regardless
+// of what the request looks like.
+app.use("/agent", requireAgentConfig);
 
 // Scoped separately from the global express.json() below so this route gets
 // its own tight 32kb body limit without changing the limit for every other
@@ -35,6 +42,12 @@ app.use(
   ) => {
     if (err?.type === "entity.too.large" || err?.status === 413) {
       res.status(413).json({ error: { code: "payload_too_large" } });
+      return;
+    }
+    if (err instanceof SyntaxError && err?.type === "entity.parse.failed") {
+      res.status(400).json({
+        error: { code: "invalid_json", fieldErrors: {}, formErrors: ["JSON invalide"] },
+      });
       return;
     }
     next(err);

@@ -94,3 +94,27 @@ export const computeRequestHash = (payload: unknown): string =>
     .createHash("sha256")
     .update(JSON.stringify(canonicalize(payload)))
     .digest("hex");
+
+export interface ApplicationFingerprintSource {
+  offerUrl?: string | null;
+  company: string;
+  position: string;
+  location?: string | null;
+}
+
+// Pure comparison, deliberately independent of any stored agentDedupKey
+// column: it recomputes the fingerprint live from an application's current
+// offerUrl/company/position/location, so it matches MANUAL applications
+// (whose agentDedupKey is always null), applications created before this
+// feature existed, and applications whose fields were corrected afterwards —
+// not just applications that already went through the agent-import path.
+export const applicationMatchesDedupKey = (
+  application: ApplicationFingerprintSource,
+  dedupKey: string,
+): boolean =>
+  computeAgentDedupKey({
+    offerUrl: application.offerUrl ?? undefined,
+    company: application.company,
+    position: application.position,
+    location: application.location ?? undefined,
+  }) === dedupKey;

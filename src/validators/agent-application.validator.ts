@@ -24,9 +24,44 @@ const requiredText = (maxLength: number) =>
 const optionalText = (maxLength: number) =>
   z.preprocess(emptyToUndefined, z.string().trim().max(maxLength).optional());
 
+const ALLOWED_OFFER_URL_PROTOCOLS = new Set(["http:", "https:"]);
+
+// The agent's offerUrl never gets fetched or rendered by this API, but it IS
+// stored and later surfaced to the frontend — reject schemes that only make
+// sense as an attack payload (javascript:, data:) or as SSRF-adjacent
+// (ftp:), and reject embedded credentials (https://user:pass@host/...).
+const isSafeOfferUrl = (value: string): boolean => {
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+
+  if (!ALLOWED_OFFER_URL_PROTOCOLS.has(url.protocol)) {
+    return false;
+  }
+
+  if (url.username !== "" || url.password !== "") {
+    return false;
+  }
+
+  return true;
+};
+
 const optionalUrl = z.preprocess(
   emptyToUndefined,
-  z.string().trim().max(MAX_URL_LENGTH).url().optional(),
+  z
+    .string()
+    .trim()
+    .max(MAX_URL_LENGTH)
+    .url()
+    .refine(isSafeOfferUrl, {
+      message:
+        "offerUrl doit être une URL http(s) sans identifiants intégrés",
+    })
+    .optional(),
 );
 
 const stackSchema = z
