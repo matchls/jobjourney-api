@@ -153,12 +153,13 @@ export const importAgentApplication = async (
     return outcomeFromReceipt(existingReceipt, requestHash);
   }
 
-  const dedupKey = computeAgentDedupKey({
+  const dedupCandidate = {
     offerUrl: data.offerUrl,
     company: data.company,
     position: data.position,
     location: data.location,
-  });
+  };
+  const dedupKey = computeAgentDedupKey(dedupCandidate);
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -179,7 +180,7 @@ export const importAgentApplication = async (
       const existingApplication = await findApplicationMatchingDedupKey(
         tx,
         context.userId,
-        dedupKey,
+        dedupCandidate,
       );
 
       if (existingApplication) {

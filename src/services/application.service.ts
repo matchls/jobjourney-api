@@ -92,18 +92,19 @@ export const updateApplication = async (
       rest.location !== undefined;
 
     if (touchesFingerprintFields) {
-      const newDedupKey = computeAgentDedupKey({
+      const mergedFingerprintFields = {
         offerUrl: rest.offerUrl !== undefined ? rest.offerUrl : application.offerUrl ?? undefined,
         company: rest.company !== undefined ? rest.company : application.company,
         position: rest.position !== undefined ? rest.position : application.position,
         location: rest.location !== undefined ? rest.location : application.location ?? undefined,
-      });
+      };
+      const newDedupKey = computeAgentDedupKey(mergedFingerprintFields);
 
       if (newDedupKey !== application.agentDedupKey) {
         const conflict = await findApplicationMatchingDedupKey(
           prisma,
           userId,
-          newDedupKey,
+          mergedFingerprintFields,
           id,
         );
 

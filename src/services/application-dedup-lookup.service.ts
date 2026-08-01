@@ -1,5 +1,9 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import { applicationMatchesDedupKey } from "../utils/agent-dedup";
+import {
+  AgentDedupInput,
+  applicationMatchesDedupSignals,
+  computeAgentDedupSignals,
+} from "../utils/agent-dedup";
 
 type QueryClient = PrismaClient | Prisma.TransactionClient;
 
@@ -9,12 +13,19 @@ type QueryClient = PrismaClient | Prisma.TransactionClient;
 // matter when or how the existing row was created. O(n) in the user's
 // application count — acceptable for a personal job tracker's volumes;
 // revisit with a generated/indexed column if that ever stops being true.
+//
+// Takes the candidate's raw fields (not a single precomputed dedup key) so
+// it can apply the mixed URL/fallback rule: both the URL and fallback
+// signals are computed once for the candidate, then compared against both
+// signals of every existing application (see applicationMatchesDedupSignals).
 export const findApplicationMatchingDedupKey = async (
   client: QueryClient,
   userId: string,
-  dedupKey: string,
+  candidate: AgentDedupInput,
   excludeApplicationId?: string,
 ) => {
+  const candidateSignals = computeAgentDedupSignals(candidate);
+
   const applications = await client.application.findMany({
     where: {
       userId,
@@ -30,6 +41,6 @@ export const findApplicationMatchingDedupKey = async (
   });
 
   return applications.find((application) =>
-    applicationMatchesDedupKey(application, dedupKey),
+    applicationMatchesDedupSignals(application, candidateSignals),
   );
 };

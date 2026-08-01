@@ -470,4 +470,56 @@ describe("POST /agent/applications", () => {
     const unchanged = await prisma.application.findUnique({ where: { id: manual.id } });
     assert.equal(unchanged!.creationSource, "MANUAL");
   });
+
+  test("mixed rule: detects a duplicate when the existing MANUAL application has no URL but the agent import does", async () => {
+    const manual = await prisma.application.create({
+      data: {
+        company: "Mixed Signal Co",
+        position: "Platform Engineer",
+        location: "Marseille",
+        userId,
+      },
+    });
+
+    const { fullKey } = await createApiKey();
+    const res = await postApplication(
+      fullKey,
+      {
+        company: "Mixed Signal Co",
+        position: "Platform Engineer",
+        location: "Marseille",
+        offerUrl: "https://example.com/jobs/mixed-signal-co",
+      },
+      "mixed-dup-1",
+    );
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.status, "duplicate");
+    assert.equal(body.applicationId, manual.id);
+  });
+
+  test("mixed rule: detects a duplicate when the existing MANUAL application has a URL but the agent import does not", async () => {
+    const manual = await prisma.application.create({
+      data: {
+        company: "Reverse Mixed Co",
+        position: "Data Engineer",
+        location: "Toulouse",
+        userId,
+        offerUrl: "https://example.com/jobs/reverse-mixed-co",
+      },
+    });
+
+    const { fullKey } = await createApiKey();
+    const res = await postApplication(
+      fullKey,
+      { company: "Reverse Mixed Co", position: "Data Engineer", location: "Toulouse" },
+      "mixed-dup-2",
+    );
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.status, "duplicate");
+    assert.equal(body.applicationId, manual.id);
+  });
 });
