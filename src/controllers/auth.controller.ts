@@ -139,22 +139,27 @@ export const googleCallback = async (req: Request, res: Response) => {
 
   const { code, state, error } = req.query;
 
-  if (typeof error === "string") {
-    redirectWithError("google_cancelled");
-    return;
-  }
-
   if (!isGoogleConfigured()) {
     redirectWithError("google_not_configured");
     return;
   }
 
+  // Le state (protection CSRF) doit être validé avant même de regarder le
+  // paramètre "error" : un callback forgé qui ajoute error=access_denied ne
+  // doit pas pouvoir contourner la vérification de state.
   if (
     typeof state !== "string" ||
     typeof stateCookie !== "string" ||
     state !== stateCookie
   ) {
     redirectWithError("invalid_state");
+    return;
+  }
+
+  if (typeof error === "string") {
+    redirectWithError(
+      error === "access_denied" ? "google_cancelled" : "google_oauth_failed",
+    );
     return;
   }
 
@@ -189,11 +194,13 @@ export const googleCallback = async (req: Request, res: Response) => {
       return;
     }
 
-    // On ne logge que le message d'erreur : l'objet d'erreur brut d'une requête
-    // HTTP échouée peut contenir le code d'autorisation ou les tokens échangés.
+    // On ne logge jamais err.message : sur une erreur venant de Google (ex. un
+    // échec d'échange de code via gaxios), le message peut embarquer le corps
+    // de la réponse HTTP et donc des données sensibles. Seul le nom/type
+    // d'erreur est loggé.
     console.error(
       "Google OAuth callback failed:",
-      err instanceof Error ? err.message : "unknown error",
+      err instanceof Error ? err.name : "UnknownError",
     );
     redirectWithError("google_oauth_failed");
   }
