@@ -9,6 +9,7 @@ import userRoutes from "./routes/user.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 import skillRoutes from "./routes/skill.routes";
 import progressionRoutes from "./routes/progression.routes";
+import agentRoutes from "./routes/agent.routes";
 
 const app = express();
 
@@ -18,6 +19,28 @@ app.use(
     credentials: true,
   }) as unknown as express.RequestHandler,
 );
+
+// Scoped separately from the global express.json() below so this route gets
+// its own tight 32kb body limit without changing the limit for every other
+// route. body-parser skips re-parsing a body it already parsed, so mounting
+// this first means the global parser below becomes a no-op for /agent/*.
+app.use("/agent", express.json({ limit: "32kb" }), agentRoutes);
+app.use(
+  "/agent",
+  (
+    err: { type?: string; status?: number },
+    _req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    if (err?.type === "entity.too.large" || err?.status === 413) {
+      res.status(413).json({ error: { code: "payload_too_large" } });
+      return;
+    }
+    next(err);
+  },
+);
+
 app.use(express.json());
 app.use(cookieParser());
 app.use("/auth", authRoutes);

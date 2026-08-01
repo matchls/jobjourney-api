@@ -38,6 +38,11 @@ export const updateApplicationSchema = createApplicationSchema
     status: z
       .enum(["TARGETED", "APPLIED", "INTERVIEWING", "OFFER", "REJECTED"])
       .optional(),
+    // User-facing confirmation that they've reviewed an agent-imported
+    // application. Handled explicitly in application.service.ts — never
+    // forwarded as-is to Prisma (creationSource/importReviewStatus/etc. are
+    // not part of this schema, so the frontend cannot set them directly).
+    confirmImportReview: z.literal(true).optional(),
   });
 
 export type CreateApplicationInput = z.infer<typeof createApplicationSchema>;

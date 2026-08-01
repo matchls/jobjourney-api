@@ -54,23 +54,36 @@ export const updateApplication = async (
     throw new Error("NOT_FOUND");
   }
 
+  // confirmImportReview is a user intent, not a Prisma column — translate it
+  // into the two real columns it actually affects, then drop it from the
+  // payload so it's never forwarded to Prisma directly.
+  const { confirmImportReview, ...rest } = data;
+
+  const reviewUpdate =
+    confirmImportReview === true && application.creationSource === "AGENT_IMPORT"
+      ? { importReviewStatus: "REVIEWED" as const, reviewedAt: new Date() }
+      : {};
+
   const statusChanged =
-    data.status !== undefined && data.status !== application.status;
+    rest.status !== undefined && rest.status !== application.status;
 
   if (!statusChanged) {
-    return prisma.application.update({ where: { id }, data });
+    return prisma.application.update({
+      where: { id },
+      data: { ...rest, ...reviewUpdate },
+    });
   }
 
   const [updated] = await prisma.$transaction([
     prisma.application.update({
       where: { id },
-      data: { ...data, statusChangedAt: new Date() },
+      data: { ...rest, ...reviewUpdate, statusChangedAt: new Date() },
     }),
     prisma.applicationStatusHistory.create({
       data: {
         applicationId: id,
         fromStatus: application.status,
-        toStatus: data.status!,
+        toStatus: rest.status!,
       },
     }),
   ]);
