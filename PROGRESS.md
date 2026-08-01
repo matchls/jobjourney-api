@@ -58,3 +58,13 @@
 - Pas d'entrée d'historique créée à la création d'une candidature (seulement lors d'un changement de statut) — le champ `fromStatus` reste nullable en DB pour rester safe, mais n'est jamais `null` en pratique avec ce flux
 - Skills : pas de nouvelle migration Prisma nécessaire, le modèle `Skill` et ses relations existaient déjà dans le schéma avant que le code applicatif ne les utilise
 - `src/app.ts` : incompatibilité de types entre `cors@2.8.6` et les overloads Express 5 sur `app.use(cors(...))` (préexistante, reproduite sur `main`) — corrigée par un cast ciblé `cors(...) as unknown as express.RequestHandler` (contournement documenté pour ce mismatch de typings, sans impact runtime)
+- Google OAuth backend (V1.1, `matchls/jobjourney-api#5`) :
+  - `GET /auth/google` et `GET /auth/google/callback` (flux Authorization Code, sans Passport, dépendance `google-auth-library` uniquement)
+  - State CSRF : valeur aléatoire (`crypto.randomBytes`) stockée dans un cookie httpOnly temporaire (`oauth_state`, 10 min, `sameSite: "lax"`), comparée puis supprimée à chaque appel du callback, que le flux réussisse ou échoue
+  - `id_token` vérifié cryptographiquement par `google-auth-library` (signature, audience = `GOOGLE_CLIENT_ID`, `email_verified === true`) — les access/refresh tokens Google ne sont jamais stockés
+  - Liaison de compte (`findOrCreateGoogleUser` dans `auth.service.ts`) : recherche par `googleId` → recherche par email (insensible à la casse) → création. Compte email existant sans `googleId` → liaison automatique sans écraser un `name`/`avatarUrl` déjà présent. Compte email existant avec un `googleId` différent → conflit (`account_conflict`), pas de fusion silencieuse. Conflit Prisma `P2002` (requêtes concurrentes) géré par re-lecture de l'utilisateur au lieu d'une erreur 500
+  - Cookie JWT (`token`) : options extraites dans `src/config/cookie.config.ts`, réutilisées telles quelles par register/login/Google/logout — corrige au passage `logout` qui ne précisait pas `secure`/`sameSite`/`path` lors du `clearCookie` (risque de cookie non supprimé en prod)
+  - Redirections frontend uniquement via des codes d'erreur publics stables (`oauthError=...`), jamais de message interne, de token ou de code OAuth dans une URL
+  - Absence de configuration Google (`GOOGLE_CLIENT_ID`/`SECRET`/`CALLBACK_URL`) : les deux routes échouent proprement (redirection `oauthError=google_not_configured`), le reste du serveur et de l'auth email démarrent et fonctionnent normalement
+  - Aucune migration Prisma nécessaire (`googleId` déjà présent dans le schéma), aucune modification de `jobjourney-web` (traité séparément dans `jobjourney-web#12`)
+  - `.env.example` créé (n'existait pas)
