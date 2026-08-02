@@ -153,14 +153,14 @@ export interface ApplicationFingerprintSource {
 // feature existed, and applications whose fields were corrected afterwards —
 // not just applications that already went through the agent-import path.
 //
-// Mixed URL/fallback rule: a match on EITHER signal counts, not just the
-// signal each side "prefers". Comparing only the single composite
-// computeAgentDedupKey() value would miss a real duplicate whenever one side
-// has an offerUrl and the other doesn't (their composite keys live in
-// disjoint url:/fallback: hash spaces even when the job is clearly the
-// same) — e.g. a MANUAL application saved without a URL, later re-offered to
-// an agent that *does* find one, or the reverse. Computing both signals for
-// both sides and accepting either match closes that gap.
+// Exact mixed URL/fallback rule:
+//   - both sides have an offerUrl  → compare normalized URLs ONLY. Two
+//     different real postings that happen to share company/position/location
+//     text must NOT be merged just because the text matches — the URL is the
+//     more specific, authoritative signal once both sides have one.
+//   - either side has no offerUrl  → compare the normalized
+//     company/position/location fallback instead, since a URL-based
+//     comparison isn't possible for the side that lacks one.
 export const applicationMatchesDedupSignals = (
   application: ApplicationFingerprintSource,
   candidateSignals: AgentDedupSignals,
@@ -172,12 +172,8 @@ export const applicationMatchesDedupSignals = (
     location: application.location ?? undefined,
   });
 
-  if (
-    candidateSignals.urlKey &&
-    applicationSignals.urlKey &&
-    candidateSignals.urlKey === applicationSignals.urlKey
-  ) {
-    return true;
+  if (candidateSignals.urlKey && applicationSignals.urlKey) {
+    return candidateSignals.urlKey === applicationSignals.urlKey;
   }
 
   return candidateSignals.fallbackKey === applicationSignals.fallbackKey;

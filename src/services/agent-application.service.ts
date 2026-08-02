@@ -30,6 +30,50 @@ const isUniqueConstraintError = (error: unknown): boolean =>
   error instanceof Prisma.PrismaClientKnownRequestError &&
   error.code === "P2002";
 
+// Postgres reports a serialization failure (SQLSTATE 40001) when two
+// SERIALIZABLE transactions overlap in a way that couldn't happen in any
+// serial ordering; Prisma surfaces it as P2034.
+const isSerializationFailure = (error: unknown): boolean =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  error.code === "P2034";
+
+const MAX_SERIALIZATION_RETRIES = 3;
+
+// The dedup pre-check (findApplicationMatchingDedupKey) scans ALL of a
+// user's applications rather than looking up a single indexed
+// agentDedupKey — necessary for the mixed URL/fallback rule, since a
+// duplicate can be a row with a *different* agentDedupKey value (one side
+// has an offerUrl, the other doesn't). That means the unique DB constraint
+// alone can't catch a race between two such "cross-shaped" concurrent
+// imports for the same job — both would compute different agentDedupKey
+// values and neither INSERT would violate the index. Running the whole
+// check-then-create sequence under SERIALIZABLE isolation makes Postgres
+// itself detect that overlap (a classic read-then-insert write skew) and
+// abort one of the two transactions with a serialization failure instead of
+// silently letting both commit. Retrying re-runs the callback from scratch:
+// on the retry, the pre-check sees whatever the winning transaction just
+// committed and correctly resolves to a duplicate rather than racing again.
+const runInSerializableTransaction = async <T>(
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> => {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_SERIALIZATION_RETRIES; attempt += 1) {
+    try {
+      return await prisma.$transaction(fn, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
+    } catch (error) {
+      if (!isSerializationFailure(error)) {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+};
+
 // Only stores what an operator reviewing an import would need: the stack the
 // agent detected, its synthesis, its confidence score/breakdown. Never the
 // idempotency key, the bearer secret, or its hash.
@@ -162,7 +206,7 @@ export const importAgentApplication = async (
   const dedupKey = computeAgentDedupKey(dedupCandidate);
 
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await runInSerializableTransaction(async (tx) => {
       const raceReceipt = await findReceipt(
         tx,
         context.apiKeyId,

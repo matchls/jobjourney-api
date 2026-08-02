@@ -522,4 +522,66 @@ describe("POST /agent/applications", () => {
     assert.equal(body.status, "duplicate");
     assert.equal(body.applicationId, manual.id);
   });
+
+  test("two different URLs with identical company/position/location create two separate applications", async () => {
+    const { fullKey } = await createApiKey();
+    const company = "Distinct URL Co";
+    const position = "Engineer";
+    const location = "Lille";
+
+    const first = await postApplication(
+      fullKey,
+      { company, position, location, offerUrl: "https://example.com/jobs/distinct-url-co-a" },
+      "distinct-url-1",
+    );
+    assert.equal(first.status, 201);
+    const firstBody = await first.json();
+
+    const second = await postApplication(
+      fullKey,
+      { company, position, location, offerUrl: "https://example.com/jobs/distinct-url-co-b" },
+      "distinct-url-2",
+    );
+    assert.equal(second.status, 201);
+    const secondBody = await second.json();
+
+    assert.notEqual(firstBody.applicationId, secondBody.applicationId);
+
+    const count = await prisma.application.count({ where: { userId, company } });
+    assert.equal(count, 2);
+  });
+
+  test("mixed concurrency: one concurrent request with a URL and one without, same job, create only one application", async () => {
+    const { fullKey } = await createApiKey();
+    const company = "Mixed Concurrency Co";
+    const position = "Reliability Engineer";
+    const location = "Bordeaux";
+
+    const [withUrl, withoutUrl] = await Promise.all([
+      postApplication(
+        fullKey,
+        {
+          company,
+          position,
+          location,
+          offerUrl: "https://example.com/jobs/mixed-concurrency",
+        },
+        "mixed-concurrency-1",
+      ),
+      postApplication(fullKey, { company, position, location }, "mixed-concurrency-2"),
+    ]);
+
+    assert.ok([200, 201].includes(withUrl.status));
+    assert.ok([200, 201].includes(withoutUrl.status));
+
+    const [withUrlBody, withoutUrlBody] = await Promise.all([
+      withUrl.json(),
+      withoutUrl.json(),
+    ]);
+
+    assert.equal(withUrlBody.applicationId, withoutUrlBody.applicationId);
+
+    const count = await prisma.application.count({ where: { userId, company } });
+    assert.equal(count, 1);
+  });
 });

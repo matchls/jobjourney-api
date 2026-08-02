@@ -166,6 +166,23 @@ describe("mixed URL/fallback dedup matching", () => {
 
     assert.equal(applicationMatchesDedupSignals(application, candidateSignals), false);
   });
+
+  test("does NOT match when both sides have different URLs, even with identical company/position/location text", () => {
+    const application = {
+      offerUrl: "https://example.com/jobs/posting-a",
+      company: "Acme",
+      position: "Engineer",
+      location: "Paris",
+    };
+    const candidateSignals = computeAgentDedupSignals({
+      offerUrl: "https://example.com/jobs/posting-b",
+      company: "Acme",
+      position: "Engineer",
+      location: "Paris",
+    });
+
+    assert.equal(applicationMatchesDedupSignals(application, candidateSignals), false);
+  });
 });
 
 describe("computeRequestHash canonicalization safety", () => {
