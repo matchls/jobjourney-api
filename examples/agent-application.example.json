@@ -1,0 +1,21 @@
+{
+  "company": "Acme Corp",
+  "position": "Développeur Backend Node.js",
+  "offerUrl": "https://example.com/jobs/42",
+  "location": "Paris",
+  "contractType": "CDI",
+  "salary": "45-55 k€",
+  "jobDescription": "Conception et maintenance d'API REST en Node.js / TypeScript, avec PostgreSQL et Prisma. Équipe de 6 personnes, revue de code systématique.",
+  "notes": "Offre repérée pendant la veille hebdomadaire.",
+  "source": "LinkedIn",
+  "stack": ["Node.js", "TypeScript", "PostgreSQL", "Prisma"],
+  "agentAnalysis": {
+    "summary": "Bon alignement sur le stack backend ; le niveau de séniorité attendu reste à confirmer.",
+    "score": 78,
+    "confidenceByField": {
+      "salary": 0.4,
+      "location": 0.9
+    },
+    "uncertainFields": ["salary"]
+  }
+}
