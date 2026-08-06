@@ -72,9 +72,124 @@ Réponses :
 
 La candidature créée reçoit `creationSource: "AGENT_IMPORT"`, `status: "TARGETED"`, `importReviewStatus: "PENDING"` si `agentAnalysis.uncertainFields` est non vide (sinon `"NOT_REQUIRED"`), et `agentImportMetadata` limité à `stack`/`summary`/`score`/`confidenceByField` (jamais de secret, de token ou de clé d'idempotence).
 
-### Import local depuis PowerShell (`scripts/import-application.ps1`)
+### Import simplifié — clé chiffrée par Windows (méthode recommandée)
+
+Deux scripts, compatibles Windows PowerShell 5.1, qui évitent de ressaisir la clé à chaque session et de nettoyer `JOB_JOURNEY_AGENT_KEY` à la main :
+
+| Script | Fréquence | Rôle |
+| --- | --- | --- |
+| `scripts/setup-agent-key.ps1` | **une seule fois** | enregistre la clé, chiffrée par Windows |
+| `scripts/import-application-secure.ps1` | à chaque candidature | déchiffre, importe, nettoie |
+
+Le second n'est qu'une enveloppe : toute la logique (validation, JSON, transport HTTPS, idempotence, redaction des erreurs) reste dans `scripts/import-application.ps1`, décrit plus bas.
+
+#### 1. Enregistrer la clé — une seule fois
+
+```powershell
+.\scripts\setup-agent-key.ps1
+```
+
+La saisie est masquée (`Read-Host -AsSecureString`). Le script vérifie que la clé n'est pas vide, ne commence ni ne finit par une espace, et commence bien par `jja_`, puis l'écrit **chiffrée** dans :
+
+```
+%APPDATA%\JobJourney\agent-key.xml
+```
+
+Le chiffrement repose sur **DPAPI** (Data Protection API de Windows), appliqué automatiquement par `Export-Clixml` à un `SecureString`. La clé de chiffrement est dérivée du **compte Windows courant** : le fichier n'est déchiffrable que par cet utilisateur, sur cette machine. Copié ailleurs, il est inexploitable.
+
+Ce que le script ne fait jamais : afficher la clé, la journaliser, l'écrire en clair, la placer dans un `.env` ou dans le dépôt. Le chemin de destination est **en dur** — aucun paramètre ne permet de désigner un autre emplacement — et trois garde-fous refusent malgré tout d'écrire dans le dépôt Git, dans un `.env`, ou vers un chemin relatif, au cas où `%APPDATA%` pointerait ailleurs.
+
+La clé enregistrée n'est jamais écrasée par accident : réenregistrer exige `-Force`.
+
+```powershell
+.\scripts\setup-agent-key.ps1 -Force   # remplace la cle existante
+```
+
+Sortie (aucun secret) :
+
+```
+Cle enregistree, chiffree par Windows (DPAPI).
+Fichier   : C:\Users\<vous>\AppData\Roaming\JobJourney\agent-key.xml
+Longueur  : 42 caracteres
+```
+
+#### 2. Importer une candidature — une seule commande
+
+```powershell
+.\scripts\import-application-secure.ps1 -InputFile .\ma-candidature.json
+```
+
+Plus de préparation, plus de nettoyage manuel. Le wrapper :
+
+1. lit et déchiffre `%APPDATA%\JobJourney\agent-key.xml` ;
+2. pose `JOB_JOURNEY_AGENT_KEY` **le temps d'un seul appel** ;
+3. appelle `scripts/import-application.ps1`, dont il renvoie la sortie telle quelle ;
+4. **supprime `JOB_JOURNEY_AGENT_KEY` dans un bloc `finally`** — donc aussi quand l'import échoue.
+
+Paramètres :
+
+| Paramètre | Obligatoire | Défaut | Rôle |
+| --- | --- | --- | --- |
+| `-InputFile` | oui | — | Chemin du fichier JSON à importer |
+| `-ApiBaseUrl` | non | `https://jobjourney-api.onrender.com` | URL de base de l'API |
+| `-IdempotencyKey` | non | GUID généré par le script appelé | Clé d'idempotence |
+
+> **Attention au défaut.** Contrairement à `import-application.ps1` (qui vise `http://localhost:4000`), ce wrapper est l'outil du geste quotidien : son défaut est **l'instance déployée**. Pour tester en local, passer explicitement `-ApiBaseUrl http://localhost:4000`.
+
+Les règles de transport restent celles du script appelé : HTTPS obligatoire hors machine locale, refus **avant** ouverture du moindre socket.
+
+À la sortie, la variable n'existe plus :
+
+```powershell
+Test-Path Env:JOB_JOURNEY_AGENT_KEY   # False, apres succes comme apres echec
+```
+
+Elle est **supprimée, pas restaurée** : si une valeur avait été posée manuellement avant l'appel, elle disparaît aussi. Laisser un secret posé « parce qu'il y était avant » irait contre le but du script.
+
+#### 3. Messages d'erreur
+
+| Situation | Message |
+| --- | --- |
+| Aucune clé enregistrée | `Aucune clé agent enregistrée : '...agent-key.xml' est introuvable.` + invitation à lancer `setup-agent-key.ps1` |
+| Fichier modifié, tronqué, ou copié depuis une autre machine/un autre compte | `Le fichier '...' est illisible ou corrompu.` + invitation à relancer le setup |
+| Fichier contenant un secret **non chiffré** | refusé explicitement — sans ce contrôle, une clé stockée en clair par erreur serait acceptée en silence |
+
+Aucun de ces messages ne recopie le contenu du fichier, pas même le blob chiffré.
+
+#### 4. Modèle de menace — ce que DPAPI protège et ne protège pas
+
+| | |
+| --- | --- |
+| ✅ | La clé n'est plus ressaisie à chaque session, ni collée dans un prompt, ni écrite en clair où que ce soit. |
+| ✅ | Le fichier est **inexploitable sur une autre machine ou sous un autre compte Windows** : sauvegarde cloud, clé USB, dépôt, partage réseau. |
+| ✅ | `JOB_JOURNEY_AGENT_KEY` ne survit pas à l'import, même en cas d'erreur — la fenêtre d'exposition passe de « toute la session » à « la durée d'un appel HTTP ». |
+| ⚠️ | **Tout processus exécuté sous CE compte Windows peut déchiffrer ce fichier.** DPAPI lie le secret à l'utilisateur, il ne cloisonne pas les programmes de cet utilisateur entre eux. Un logiciel malveillant lancé par vous y a accès, exactement comme vous. |
+| ⚠️ | Pendant l'appel, la clé existe en clair dans le processus et dans son bloc d'environnement — c'est inévitable puisqu'elle part dans un en-tête HTTP. |
+| ⚠️ | Un `Ctrl+C` est intercepté par le `finally` et la variable est nettoyée ; une **fermeture brutale du processus** (kill, coupure de courant) ne l'est pas. La variable n'existant que dans ce processus, elle disparaît malgré tout avec lui. |
+
+Conséquences pratiques : garder la clé limitée au scope `applications:create`, la créer avec `--expires-days`, savoir la révoquer (`revokedAt` sur la ligne `AgentApiKey`), et supprimer le fichier quand il n'est plus utile :
+
+```powershell
+Remove-Item "$env:APPDATA\JobJourney\agent-key.xml"
+```
+
+#### 5. Validation locale
+
+Tests hors ligne, sans clé réelle et sans appel sortant — `%APPDATA%` est redirigé vers un dossier temporaire, `Read-Host` est simulé, et les imports visent un serveur factice sur `127.0.0.1`. Une assertion finale prouve que le magasin réel n'a pas été touché :
+
+```powershell
+.\scripts\test-agent-key-secure.ps1
+```
+
+Couverture : setup nominal, saisies refusées (vide, mauvais préfixe, casse, trop courte, espaces), protection contre l'écrasement, refus d'écrire dans le dépôt, absence de la clé en clair dans le fichier, import mocké de bout en bout, fidélité du cycle pour une clé à caractères spéciaux, nettoyage de la variable après succès **et** après erreur, fichier absent, fichier corrompu, blob DPAPI tronqué, secret non chiffré refusé, et absence de fuite du secret dans toutes les sorties.
+
+---
+
+### Import local depuis PowerShell (`scripts/import-application.ps1`) — méthode manuelle, conservée en secours
 
 Script versionné permettant d'envoyer un fichier JSON vers `POST /agent/applications` depuis un poste Windows, **sans connecteur MCP et sans stocker le moindre secret dans le dépôt**. Compatible Windows PowerShell 5.1 (aucun module externe requis).
+
+C'est **l'implémentation de référence** : le wrapper sécurisé ci-dessus l'appelle sans rien réimplémenter. Cette section reste la méthode de secours, utile quand DPAPI n'est pas disponible ou souhaitable — poste partagé, compte de service, machine autre que celle où la clé a été enregistrée, ou débogage du script lui-même.
 
 Un exemple de charge utile conforme au schéma est fourni dans `examples/agent-application.example.json`.
 
@@ -220,7 +335,7 @@ Conséquences pratiques :
 
 #### ⚠️ Règles de sécurité
 
-- **Ne pas mettre la clé dans un `.env`** ni dans aucun fichier du dépôt : elle se pose en variable de session uniquement.
+- **Ne pas mettre la clé dans un `.env`** ni dans aucun fichier du dépôt : elle se pose en variable de session uniquement, ou dans le magasin chiffré `%APPDATA%\JobJourney\agent-key.xml` (hors dépôt, hors `.env`, voir la méthode recommandée plus haut).
 - **Ne jamais committer de secret** — ni clé, ni fichier d'environnement, ni exemple contenant une vraie clé.
 - **Ne jamais coller la clé dans une conversation** (agent, chat, ticket, capture d'écran) : un secret collé doit être considéré comme compromis et révoqué (`revokedAt` sur la ligne `AgentApiKey`, voir plus haut).
 - **Ne pas laisser la variable posée plus longtemps que nécessaire** : le script n'efface que ses propres copies en mémoire, la variable de session reste posée jusqu'au nettoyage manuel de l'étape 4.
