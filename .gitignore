@@ -22,3 +22,6 @@ Thumbs.db
 .vscode
 .idea
 /generated/prisma
+
+# Candidatures importées (données personnelles)
+candidature-*.json
