@@ -1,84 +1,38 @@
 import { z } from "zod";
+import {
+  MAX_LONG_TEXT,
+  MAX_SHORT_TEXT,
+  MAX_URL_LENGTH,
+  confidenceScore,
+  optionalOfferUrl,
+  optionalText,
+  requiredText,
+} from "./field-rules";
 
-// Reasonable upper bounds so a misbehaving or adversarial agent can't push
-// unbounded strings/arrays through this route (it skips the normal cookie
-// auth + browser form constraints the rest of the API relies on).
-const MAX_SHORT_TEXT = 300;
-const MAX_LONG_TEXT = 20000;
-const MAX_URL_LENGTH = 2000;
+// Bornes propres au flux agent (le reste des bornes de longueur et les règles
+// de normalisation vivent dans field-rules.ts, partagées avec les autres
+// producteurs "machine").
 const MAX_STACK_ITEMS = 50;
 const MAX_STACK_ITEM_LENGTH = 100;
 const MAX_UNCERTAIN_FIELDS = 30;
 const MAX_FIELD_NAME_LENGTH = 100;
 const MAX_CONFIDENCE_ENTRIES = 30;
 
-// An agent sending "" for a field it has no value for should behave like
-// omitting the field entirely, same convention as the human-facing
-// application.validator.ts.
-const emptyToUndefined = (val: unknown) =>
-  typeof val === "string" && val.trim() === "" ? undefined : val;
-
-const requiredText = (maxLength: number) =>
-  z.string().trim().min(1).max(maxLength);
-
-const optionalText = (maxLength: number) =>
-  z.preprocess(emptyToUndefined, z.string().trim().max(maxLength).optional());
-
-const ALLOWED_OFFER_URL_PROTOCOLS = new Set(["http:", "https:"]);
-
-// The agent's offerUrl never gets fetched or rendered by this API, but it IS
-// stored and later surfaced to the frontend — reject schemes that only make
-// sense as an attack payload (javascript:, data:) or as SSRF-adjacent
-// (ftp:), and reject embedded credentials (https://user:pass@host/...).
-const isSafeOfferUrl = (value: string): boolean => {
-  let url: URL;
-
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-
-  if (!ALLOWED_OFFER_URL_PROTOCOLS.has(url.protocol)) {
-    return false;
-  }
-
-  if (url.username !== "" || url.password !== "") {
-    return false;
-  }
-
-  return true;
-};
-
-const optionalUrl = z.preprocess(
-  emptyToUndefined,
-  z
-    .string()
-    .trim()
-    .max(MAX_URL_LENGTH)
-    .url()
-    .refine(isSafeOfferUrl, {
-      message:
-        "offerUrl doit être une URL http(s) sans identifiants intégrés",
-    })
-    .optional(),
-);
-
 const stackSchema = z
   .array(z.string().trim().min(1).max(MAX_STACK_ITEM_LENGTH))
   .max(MAX_STACK_ITEMS)
   .optional();
 
+// Le flux agent accepte des noms de champ libres (l'agent peut annoter des
+// champs qui ne sont pas ceux de l'Application), d'où les clés en string
+// plutôt qu'un enum fermé comme dans le contrat d'extraction.
 const uncertainFieldsSchema = z
   .array(z.string().trim().min(1).max(MAX_FIELD_NAME_LENGTH))
   .max(MAX_UNCERTAIN_FIELDS)
   .optional();
 
 const confidenceByFieldSchema = z
-  .record(
-    z.string().trim().min(1).max(MAX_FIELD_NAME_LENGTH),
-    z.number().min(0).max(1),
-  )
+  .record(z.string().trim().min(1).max(MAX_FIELD_NAME_LENGTH), confidenceScore)
   .refine((entries) => Object.keys(entries).length <= MAX_CONFIDENCE_ENTRIES, {
     message: `confidenceByField accepte au maximum ${MAX_CONFIDENCE_ENTRIES} champs`,
   })
@@ -98,7 +52,7 @@ export const createAgentApplicationSchema = z
   .object({
     company: requiredText(MAX_SHORT_TEXT),
     position: requiredText(MAX_SHORT_TEXT),
-    offerUrl: optionalUrl,
+    offerUrl: optionalOfferUrl(MAX_URL_LENGTH),
     location: optionalText(MAX_SHORT_TEXT),
     contractType: optionalText(MAX_SHORT_TEXT),
     salary: optionalText(MAX_SHORT_TEXT),
