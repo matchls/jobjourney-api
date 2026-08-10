@@ -11,6 +11,54 @@ Copier `.env.example` vers `.env` et renseigner les valeurs (voir ce fichier pou
   - Sans `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL`, ces deux routes échouent proprement (redirection avec `oauthError=google_not_configured`) sans affecter l'auth email.
   - En cas d'erreur, redirection vers `${CLIENT_URL}/login?oauthError=<code>` avec un code stable (`google_cancelled`, `invalid_state`, `invalid_google_account`, `account_conflict`, `google_oauth_failed`, `google_not_configured`) — jamais de détail interne dans l'URL.
 
+## Extraction IA d'une offre (V1.2)
+
+`POST /applications/parse-offer` — auth cookie utilisateur classique (`authenticate`), **jamais la clé agent**.
+
+Transforme le texte brut d'une annonce en aperçu structuré destiné à préremplir le formulaire de nouvelle candidature. **Cet endpoint n'écrit rien** : il ne crée, ne modifie et ne supprime aucune `Application`. Le service métier n'importe même pas Prisma. C'est l'utilisateur qui valide ensuite le formulaire, ce qui appelle le `POST /applications` habituel.
+
+```jsonc
+// Requête
+{
+  "offerText": "texte brut collé par l'utilisateur", // obligatoire, 1 à 20 000 caractères
+  "offerUrl": "https://example.com/jobs/42",         // optionnel, http(s) sans identifiants
+  "sourceHint": "LinkedIn"                           // optionnel
+}
+```
+
+La réponse est exactement le contrat d'extraction défini en #16 (`jobOfferExtractionResultSchema`) : `fields` (12 champs, ceux qui sont absents de l'offre sont omis), plus `confidenceByField`, `uncertainFields` et `warnings`, qui ne sont jamais persistés.
+
+### Fournisseur
+
+Groq, isolé derrière l'interface `JobOfferExtractionProvider` (`src/services/job-offer-extraction.provider.ts`). Seul `groq-job-offer-extraction.provider.ts` connaît l'API Groq ; le contrôleur et le service n'en savent rien. La réponse du modèle est **toujours revalidée** par le schéma Zod de #16, même si Groq garantit la conformité au JSON Schema en strict mode.
+
+Configuration : `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_TIMEOUT_MS` (voir `.env.example`). Le modèle et le timeout sont centralisés dans `src/config/groq.config.ts`, jamais dispersés dans le code.
+
+### Confidentialité
+
+Seuls `offerText`, `offerUrl` et `sourceHint` sont envoyés au fournisseur. Aucun profil utilisateur, email de connexion, CV, lettre de motivation ni mot de passe ne quitte l'API. Les logs (`src/utils/extraction-logger.ts`) n'acceptent structurellement que des identifiants et des codes : ni le texte de l'offre, ni la réponse brute du modèle, ni la clé Groq ne peuvent y être écrits.
+
+**Prompt injection.** Les trois champs viennent du même formulaire utilisateur : aucun n'est traité comme une métadonnée de confiance. Ils sont sérialisés en JSON à l'intérieur d'une **même zone non fiable**, encadrée par une balise dont le suffixe est régénéré à chaque requête. Deux protections superposées : le nonce empêche un contenu piégé de « fermer » la zone pour faire passer la suite pour des instructions, et l'encodage JSON empêche un champ de se faire passer pour un autre. Le prompt système déclare explicitement que les trois champs sont des données à analyser, qu'aucune instruction qui s'y trouve ne doit être exécutée, et que `sourceHint` n'est qu'un indice de provenance — ni une consigne, ni une vérité absolue (si l'annonce indique une autre provenance, l'annonce prime et l'écart part dans `warnings`).
+
+### Erreurs
+
+| Code | HTTP | Cause |
+| --- | --- | --- |
+| `validation_error` | 400 | `offerText` vide, trop long, ou champ inconnu |
+| `payload_too_large` | 413 | Corps de requête au-delà de 256 kb |
+| `rate_limited` | 429 | Budget utilisateur dépassé (voir ci-dessous) |
+| `extraction_rate_limited` | 429 | Quota du fournisseur épuisé |
+| `extraction_not_configured` | 503 | `GROQ_API_KEY` absente ou refusée |
+| `extraction_timeout` | 504 | Le fournisseur n'a pas répondu à temps |
+| `extraction_unavailable` | 502 | Fournisseur en panne (5xx, réseau) |
+| `extraction_invalid_response` | 502 | Réponse non conforme au contrat #16 |
+
+**Fallback manuel :** une indisponibilité de l'IA ne bloque jamais la création d'une candidature. Les limites et quotas du fournisseur peuvent évoluer sans préavis ; en cas d'échec, le frontend doit simplement ouvrir le formulaire vide et laisser l'utilisateur saisir sa candidature normalement via `POST /applications`.
+
+### Rate limiting
+
+20 requêtes / 10 minutes, indexé par utilisateur (`src/middlewares/parse-offer-rate-limit.middleware.ts`). Chaque appel consomme du quota Groq payant, d'où une limite plus basse que celle du flux agent. Même réserve que pour l'agent : compteur en mémoire, **local à chaque instance Render**.
+
 ## Import de candidatures par agent (V1.1)
 
 Workflow dédié pour permettre à un agent externe (pas un navigateur, pas un utilisateur) de créer des candidatures sans jamais toucher à SQL, aux cookies utilisateurs, ni à la lecture/modification/suppression de données : `agent → JSON → validation Zod → service applicatif → Prisma`.

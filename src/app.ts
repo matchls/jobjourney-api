@@ -54,6 +54,34 @@ app.use(
   },
 );
 
+// Le texte d'offre collé est le seul body volumineux attendu de l'app web.
+// Parseur dédié, monté avant le parseur global (que body-parser rendra alors
+// no-op pour ce chemin), pour lui donner sa propre limite sans desserrer
+// celle de toutes les autres routes. 256kb couvre confortablement les 20 000
+// caractères autorisés pour offerText, même en UTF-8 dense.
+app.use("/applications/parse-offer", express.json({ limit: "256kb" }));
+app.use(
+  "/applications/parse-offer",
+  (
+    err: { type?: string; status?: number },
+    _req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    if (err?.type === "entity.too.large" || err?.status === 413) {
+      res.status(413).json({ error: { code: "payload_too_large" } });
+      return;
+    }
+    if (err instanceof SyntaxError && err?.type === "entity.parse.failed") {
+      res.status(400).json({
+        error: { code: "invalid_json", fieldErrors: {}, formErrors: ["JSON invalide"] },
+      });
+      return;
+    }
+    next(err);
+  },
+);
+
 app.use(express.json());
 app.use(cookieParser());
 app.use("/auth", authRoutes);
