@@ -36,7 +36,9 @@ Configuration : `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_TIMEOUT_MS` (voir `.env.exam
 
 ### Confidentialité
 
-Seuls `offerText`, `offerUrl` et `sourceHint` sont envoyés au fournisseur. Aucun profil utilisateur, email de connexion, CV, lettre de motivation ni mot de passe ne quitte l'API. Les logs (`src/utils/extraction-logger.ts`) n'acceptent structurellement que des identifiants et des codes : ni le texte de l'offre, ni la réponse brute du modèle, ni la clé Groq ne peuvent y être écrits. Le texte de l'annonce est transmis au modèle encadré par une balise dont le suffixe change à chaque requête, et le prompt système lui interdit explicitement de traiter son contenu comme des instructions (prompt injection).
+Seuls `offerText`, `offerUrl` et `sourceHint` sont envoyés au fournisseur. Aucun profil utilisateur, email de connexion, CV, lettre de motivation ni mot de passe ne quitte l'API. Les logs (`src/utils/extraction-logger.ts`) n'acceptent structurellement que des identifiants et des codes : ni le texte de l'offre, ni la réponse brute du modèle, ni la clé Groq ne peuvent y être écrits.
+
+**Prompt injection.** Les trois champs viennent du même formulaire utilisateur : aucun n'est traité comme une métadonnée de confiance. Ils sont sérialisés en JSON à l'intérieur d'une **même zone non fiable**, encadrée par une balise dont le suffixe est régénéré à chaque requête. Deux protections superposées : le nonce empêche un contenu piégé de « fermer » la zone pour faire passer la suite pour des instructions, et l'encodage JSON empêche un champ de se faire passer pour un autre. Le prompt système déclare explicitement que les trois champs sont des données à analyser, qu'aucune instruction qui s'y trouve ne doit être exécutée, et que `sourceHint` n'est qu'un indice de provenance — ni une consigne, ni une vérité absolue (si l'annonce indique une autre provenance, l'annonce prime et l'écart part dans `warnings`).
 
 ### Erreurs
 
