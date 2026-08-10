@@ -1,21 +1,17 @@
 import { z } from "zod";
+import { optionalFormEmail, optionalFormUrl } from "./field-rules";
 
 // Some optional fields have a format constraint (url, email). Browser forms
 // send "" rather than omitting the key when the user clears an optional
-// input, and "" fails .url()/.email() validation — normalize it to
-// `undefined` first so clearing the field doesn't 400 the request.
-const emptyToUndefined = (val: unknown) => (val === "" ? undefined : val);
-const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
-const optionalEmail = z.preprocess(
-  emptyToUndefined,
-  z.string().email().optional(),
-);
+// input, and "" fails .url()/.email() validation — the "form" rules in
+// field-rules.ts normalize it to `undefined` first so clearing the field
+// doesn't 400 the request.
 
 export const createApplicationSchema = z.object({
   company: z.string().min(1),
   position: z.string().min(1),
   source: z.string().optional(),
-  offerUrl: optionalUrl,
+  offerUrl: optionalFormUrl,
   appliedAt: z.string().datetime().optional(),
   resumeText: z.string().optional(),
   coverLetterText: z.string().optional(),
@@ -29,7 +25,7 @@ export const createApplicationSchema = z.object({
   jobDescription: z.string().optional(),
   contactName: z.string().optional(),
   contactRole: z.string().optional(),
-  contactEmail: optionalEmail,
+  contactEmail: optionalFormEmail,
   referralNote: z.string().optional(),
 });
 
