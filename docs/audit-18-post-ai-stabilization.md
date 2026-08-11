@@ -5,13 +5,37 @@
 
 ## Verdict
 
-**READY FOR DAILY USE**
+**NOT READY FOR DAILY USE — validation E2E réelle restante**
 
-Aucun bloquant. Les trois workflows (création manuelle, import agent, préremplissage IA) fonctionnent, ne se marchent pas dessus, et une panne du fournisseur IA ne bloque jamais la saisie manuelle. Les dettes restantes sont listées ci-dessous et suivies en issues.
+L'audit statique et les suites automatisées ne révèlent aucun défaut : les trois workflows (création manuelle, import agent, préremplissage IA) sont cohérents, ne se marchent pas dessus, et une panne du fournisseur IA ne bloque jamais la saisie manuelle. Les dettes trouvées sont listées plus bas et suivies en issues.
+
+Mais tout ce qui touche au fournisseur a été vérifié **avec Groq mocké**. Le critère de clôture de #18 demande explicitement de dérouler le workflow produit réel une fois, de bout en bout, contre le vrai fournisseur. Tant que ce passage n'a pas été fait, le verdict reste `NOT READY` : ce n'est pas un doute sur le code, c'est une vérification exigée qui n'a pas encore eu lieu.
 
 ## Bloquants avant usage réel
 
-Aucun.
+**Validation manuelle du workflow complet, contre le fournisseur réel.**
+Frontend → API → Groq réel → préremplissage → correction utilisateur → création → relecture de la candidature créée.
+
+Ce point n'est **pas un bug identifié**. Aucune anomalie ne le motive : c'est un critère d'acceptation de #18 qui reste à exécuter. Les tests automatisés prouvent le comportement du code face à un fournisseur simulé ; ils ne prouvent pas que la clé est bien configurée sur l'environnement déployé, que le modèle retenu renvoie effectivement une réponse conforme au JSON Schema en strict mode, ni que la qualité d'extraction sur une vraie annonce est exploitable.
+
+Volontairement **sans issue dédiée** : cette validation appartient directement aux critères de clôture de #18, elle n'a pas à être suivie ailleurs.
+
+### Checklist de validation manuelle
+
+À dérouler une fois dans l'application déployée, avec une annonce réelle. Cocher les huit points suffit à lever ce bloquant.
+
+- [ ] `GROQ_API_KEY` est configurée sur l'environnement visé (sinon l'analyse répond `503` et la checklist ne teste rien).
+- [ ] Ouvrir « Nouvelle candidature », puis « Importer une offre avec l'IA » : le panneau s'ouvre et le curseur arrive dans le textarea.
+- [ ] Coller une annonce réelle complète et cliquer sur « Traiter l'offre » : l'état de chargement s'affiche et le bouton se désactive.
+- [ ] La réponse arrive et préremplit les champs attendus (entreprise, poste, lieu, contrat, salaire, description…) avec des valeurs plausibles.
+- [ ] **Pendant l'analyse, aucune candidature n'apparaît dans la liste** — à vérifier avant de créer quoi que ce soit.
+- [ ] Corriger au moins un champ à la main, dont un champ marqué « À vérifier » s'il y en a : l'indicateur de ce champ disparaît, les autres restent.
+- [ ] Cliquer sur « Créer la candidature » : **une seule** candidature est créée, avec les valeurs visibles à l'écran au moment du clic.
+- [ ] Rouvrir la candidature créée et la relire : les valeurs corrigées sont bien celles enregistrées, et aucune métadonnée d'extraction n'apparaît.
+
+Point d'attention connu pendant la relecture : `contractType` et `notes` ne s'affichent pas encore sur la fiche ([web#27](https://github.com/matchls/jobjourney-web/issues/27)). Les vérifier dans « Modifier » plutôt que sur la fiche, ce n'est pas un échec de la checklist.
+
+Si un point échoue, ouvrir une issue dédiée décrivant l'écart observé, plutôt que de compléter ce rapport.
 
 ## À corriger prochainement
 
