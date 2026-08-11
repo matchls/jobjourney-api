@@ -5,37 +5,32 @@
 
 ## Verdict
 
-**NOT READY FOR DAILY USE — validation E2E réelle restante**
+**READY FOR DAILY USE**
 
-L'audit statique et les suites automatisées ne révèlent aucun défaut : les trois workflows (création manuelle, import agent, préremplissage IA) sont cohérents, ne se marchent pas dessus, et une panne du fournisseur IA ne bloque jamais la saisie manuelle. Les dettes trouvées sont listées plus bas et suivies en issues.
+L'audit statique et les suites automatisées ne révèlent aucun défaut : les trois workflows (création manuelle, import agent, préremplissage IA) sont cohérents, ne se marchent pas dessus, et une panne du fournisseur IA ne bloque jamais la saisie manuelle.
 
-Mais tout ce qui touche au fournisseur a été vérifié **avec Groq mocké**. Le critère de clôture de #18 demande explicitement de dérouler le workflow produit réel une fois, de bout en bout, contre le vrai fournisseur. Tant que ce passage n'a pas été fait, le verdict reste `NOT READY` : ce n'est pas un doute sur le code, c'est une vérification exigée qui n'a pas encore eu lieu.
+La réserve qui maintenait ce rapport en `NOT READY` — tout ce qui touche au fournisseur n'avait été vérifié qu'avec Groq mocké — est levée : le smoke test E2E réel exigé par les critères de clôture de #18 a été exécuté avec succès le **11/08/2026**. Les dettes restantes sont listées plus bas et suivies en issues ; aucune n'empêche l'usage quotidien.
 
 ## Bloquants avant usage réel
 
-**Validation manuelle du workflow complet, contre le fournisseur réel.**
-Frontend → API → Groq réel → préremplissage → correction utilisateur → création → relecture de la candidature créée.
+Aucun.
 
-Ce point n'est **pas un bug identifié**. Aucune anomalie ne le motive : c'est un critère d'acceptation de #18 qui reste à exécuter. Les tests automatisés prouvent le comportement du code face à un fournisseur simulé ; ils ne prouvent pas que la clé est bien configurée sur l'environnement déployé, que le modèle retenu renvoie effectivement une réponse conforme au JSON Schema en strict mode, ni que la qualité d'extraction sur une vraie annonce est exploitable.
+## Validation E2E réelle — exécutée le 11/08/2026
 
-Volontairement **sans issue dédiée** : cette validation appartient directement aux critères de clôture de #18, elle n'a pas à être suivie ailleurs.
+Workflow complet déroulé une fois dans l'application déployée, contre le vrai fournisseur : frontend → API → Groq réel → préremplissage → correction humaine → création → relecture.
 
-### Checklist de validation manuelle
+- [x] `GROQ_API_KEY` configurée sur l'environnement visé.
+- [x] Ouverture de « Nouvelle candidature » puis « Importer une offre avec l'IA ».
+- [x] Collage d'une annonce réelle (offre WeScale) et clic sur « Traiter l'offre » : chargement affiché, bouton désactivé.
+- [x] Préremplissage correct des champs attendus, avec des valeurs exploitables.
+- [x] **Aucune candidature créée pendant l'analyse.**
+- [x] Correction humaine d'au moins un champ avant validation.
+- [x] Création : **une seule** candidature, avec les valeurs visibles à l'écran.
+- [x] Relecture de la candidature créée : valeurs persistées conformes, aucune métadonnée d'extraction.
 
-À dérouler une fois dans l'application déployée, avec une annonce réelle. Cocher les huit points suffit à lever ce bloquant.
+Ce passage confirme ce que les tests mockés ne pouvaient pas prouver : clé effectivement prise en compte sur l'environnement déployé, réponse du modèle retenu conforme au JSON Schema en strict mode, et qualité d'extraction exploitable sur une annonce réelle.
 
-- [ ] `GROQ_API_KEY` est configurée sur l'environnement visé (sinon l'analyse répond `503` et la checklist ne teste rien).
-- [ ] Ouvrir « Nouvelle candidature », puis « Importer une offre avec l'IA » : le panneau s'ouvre et le curseur arrive dans le textarea.
-- [ ] Coller une annonce réelle complète et cliquer sur « Traiter l'offre » : l'état de chargement s'affiche et le bouton se désactive.
-- [ ] La réponse arrive et préremplit les champs attendus (entreprise, poste, lieu, contrat, salaire, description…) avec des valeurs plausibles.
-- [ ] **Pendant l'analyse, aucune candidature n'apparaît dans la liste** — à vérifier avant de créer quoi que ce soit.
-- [ ] Corriger au moins un champ à la main, dont un champ marqué « À vérifier » s'il y en a : l'indicateur de ce champ disparaît, les autres restent.
-- [ ] Cliquer sur « Créer la candidature » : **une seule** candidature est créée, avec les valeurs visibles à l'écran au moment du clic.
-- [ ] Rouvrir la candidature créée et la relire : les valeurs corrigées sont bien celles enregistrées, et aucune métadonnée d'extraction n'apparaît.
-
-Point d'attention connu pendant la relecture : `contractType` et `notes` ne s'affichent pas encore sur la fiche ([web#27](https://github.com/matchls/jobjourney-web/issues/27)). Les vérifier dans « Modifier » plutôt que sur la fiche, ce n'est pas un échec de la checklist.
-
-Si un point échoue, ouvrir une issue dédiée décrivant l'écart observé, plutôt que de compléter ce rapport.
+Deux améliorations UX **non bloquantes** ont été repérées pendant ce passage et sont tracées : [web#29](https://github.com/matchls/jobjourney-web/issues/29) et [web#30](https://github.com/matchls/jobjourney-web/issues/30) (voir « Améliorations futures »).
 
 ## À corriger prochainement
 
@@ -51,6 +46,8 @@ Si un point échoue, ouvrir une issue dédiée décrivant l'écart observé, plu
 | --- | --- |
 | [api#23](https://github.com/matchls/jobjourney-api/issues/23) | Aucun lint côté API ; l'export `isGroqConfigured` est mort depuis #17. |
 | [web#28](https://github.com/matchls/jobjourney-web/issues/28) | La limite de 20 000 caractères est dupliquée en dur côté frontend, sans lien avec `MAX_LONG_TEXT` de l'API. |
+| [web#29](https://github.com/matchls/jobjourney-web/issues/29) | Repéré au smoke test E2E : préremplir le lien et la source depuis une URL d'offre collée dans l'import IA. |
+| [web#30](https://github.com/matchls/jobjourney-web/issues/30) | Repéré au smoke test E2E : replier le bloc « Détails de l'offre » sur la fiche candidature. |
 
 Sans issue dédiée : la modale de création reste en `sm:max-w-sm` (384 px) alors qu'elle héberge désormais un textarea d'import de 6 lignes en plus des 14 champs. Utilisable, mais à réévaluer à l'usage réel plutôt que sur hypothèse.
 
@@ -84,7 +81,8 @@ Sans issue dédiée : la modale de création reste en `sm:max-w-sm` (384 px) alo
 | Web | `npm test` | 64 tests, 0 échec |
 | Web | `npm run build` | OK |
 | Web | `npm run lint` | OK |
+| E2E | smoke test manuel contre Groq réel (11/08/2026) | OK — voir la section dédiée |
 
 CI : le frontend a un check Vercel (vert sur les PR #25 et #26). L'API n'a pas de CI configurée ; les commandes ci-dessus sont à lancer localement avant chaque merge.
 
-Aucun test n'utilise de clé Groq réelle ni ne sort sur le réseau.
+Aucun test **automatisé** n'utilise de clé Groq réelle ni ne sort sur le réseau : le seul passage contre le vrai fournisseur est le smoke test manuel ci-dessus.
