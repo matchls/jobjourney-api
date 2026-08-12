@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { corsOrigin } from "./config/cors.config";
 import authRoutes from "./routes/auth.routes";
 import applicationRoutes from "./routes/application.routes";
 import interviewStepRoutes from "./routes/interview-step.routes";
@@ -14,9 +15,12 @@ import { requireAgentConfig } from "./middlewares/agent-config.middleware";
 
 const app = express();
 
+// L'origine autorisée n'est plus une chaîne figée mais un délégué : il faut
+// accepter, en plus de CLIENT_URL, les previews Vercel d'un projet et d'une
+// team explicitement déclarés. Toute la règle vit dans cors.config.ts.
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin: corsOrigin,
     credentials: true,
   }) as unknown as express.RequestHandler,
 );

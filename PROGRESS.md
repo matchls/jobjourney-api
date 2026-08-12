@@ -35,6 +35,20 @@
   - `PATCH` preparation-task accepte `skillId: null` pour détacher une compétence liée
 - Contrat commun d'extraction d'offre (`job-offer-extraction.validator.ts`) — données uniquement, aucun fournisseur IA branché
 - `POST /applications/parse-offer` — extraction IA d'une offre via Groq, sans créer de candidature
+- CORS : previews Vercel du projet Job Journey autorisées (issue #25) :
+  - Problème : `origin` était une chaîne figée (`CLIENT_URL`), donc toute preview Vercel du frontend se faisait refuser — le site se chargeait mais aucun appel API ne passait
+  - `src/config/cors.config.ts` — toute la règle est isolée là, variables relues à chaque appel (comme `groq.config.ts`) pour que le serveur démarre sans elles et que les tests puissent les poser/retirer
+  - Deux familles d'origines autorisées et **aucune autre** : `CLIENT_URL` exact, et les previews d'**un** projet dans **une** team déclarés via `CORS_VERCEL_PROJECT` + `CORS_VERCEL_TEAM`
+  - **Aucune règle `*.vercel.app`** : le domaine est ouvert à l'inscription, une telle règle donnerait au site de n'importe qui l'accès à l'API avec les cookies de nos utilisateurs (`credentials: true` conservé)
+  - Vérification **structurelle**, jamais par `includes` : hostname découpé en labels DNS, exactement `<déploiement>.vercel.app` (3 labels, aucun port), label de déploiement commençant par `<projet>-` et finissant par `-<team>` avec du contenu entre les deux. Écarte `evil-<projet>-x-<team>.vercel.app`, `<projet>-x-<team>.vercel.app.evil.net`, `<projet>-x-<team>evil.vercel.app`
+  - Le verrou réel est le **suffixe team** : le slug est attribué par Vercel, personne hors de la team ne peut produire une URL qui s'y termine. Le nom de projet seul ne protégerait rien
+  - **Fail-closed** : si l'une des deux variables manque, aucune preview n'est autorisée et l'API se comporte exactement comme avant
+  - HTTPS obligatoire pour les previews ; `Origin` absent (curl, serveur-à-serveur, health check) toujours accepté — le header n'est posé que par un navigateur, le refuser casserait ces clients sans rien protéger ; localhost inchangé
+  - Origine refusée → `callback(null, false)` (aucun en-tête CORS, le navigateur bloque) et non une `Error`, qui ferait répondre 500 à une requête simplement non autorisée
+  - Origine opaque (`file://`, `data:`, iframe sandboxée) refusée explicitement : `new URL()` en fait la chaîne littérale `"null"`, qui n'est comparable à rien — cas trouvé par les tests
+  - Comparaison sur `URL.origin` des deux côtés : un `CLIENT_URL` avec slash final ne casse plus la production
+  - 19 tests unitaires purs (212 au total, aucune base ni réseau) : prod exacte, slash final, preview valide, preview de branche git, autre projet, autre team, HTTP refusé, 12 lookalikes, casse, configuration incomplète, `Origin` absent, localhost, entrées malformées, forme du délégué
+  - Déploiement : ajouter `CORS_VERCEL_PROJECT` et `CORS_VERCEL_TEAM` dans Render (aucun secret, aucune migration) — voir la section CORS du README
 
 ## 🔄 En cours
 
