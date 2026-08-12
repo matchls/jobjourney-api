@@ -15,7 +15,13 @@ L'API accepte les requêtes navigateur de **deux** familles d'origines, et d'auc
 
 ### Previews Vercel
 
-Une preview Vercel a l'URL `https://<projet>-<hash>-<team>.vercel.app`. Deux variables décrivent celle qu'on accepte :
+Seule la **forme commit** est acceptée — celle du bouton *View deployment* d'un commit :
+
+```
+https://<projet>-<hash 9 alphanumériques>-<team>.vercel.app
+```
+
+Deux variables décrivent le projet et la team acceptés :
 
 | Variable | Exemple | Rôle |
 | --- | --- | --- |
@@ -30,11 +36,28 @@ Règle appliquée, volontairement structurelle :
 
 - HTTPS uniquement — une preview en `http://` est refusée ;
 - hostname découpé en labels DNS, avec **exactement** `<déploiement>.vercel.app` (3 labels, aucun port) ;
-- le label de déploiement doit commencer par `<projet>-` **et** finir par `-<team>`, avec quelque chose entre les deux.
+- le label de déploiement doit commencer par `<projet>-`, finir par `-<team>`, et **ne contenir entre les deux qu'un hash de 9 caractères alphanumériques**.
 
 Il n'y a **aucune** règle `*.vercel.app` : ce domaine est ouvert à l'inscription, une telle règle autoriserait le site de n'importe qui à parler à l'API avec les cookies de nos utilisateurs. La comparaison ne fait jamais de `includes` : `evil-jobjourney-web-x-team.vercel.app`, `jobjourney-web-x-team.vercel.app.evil.net` et `jobjourney-web-x-teamevil.vercel.app` sont tous refusés.
 
-Le verrou réel est le **suffixe team** : le slug est attribué par Vercel, personne hors de la team ne peut produire une URL qui s'y termine. Le nom de projet seul ne protégerait rien.
+Deux vérifications portent le poids de la sécurité, et elles sont complémentaires :
+
+| Vérification | Ce qu'elle empêche |
+| --- | --- |
+| **Suffixe team** | Le slug est attribué par Vercel : personne **hors de la team** ne peut produire une URL qui s'y termine. |
+| **Hash exact** | Un autre projet **de la même team** dont le nom commence par le nôtre. Sans lui, `jobjourney-web-copy-a1b2c3d4e-<team>.vercel.app` passerait — il commence bien par `jobjourney-web-` et finit bien par `-<team>`. Exiger un hash strict force tout nom de projet supplémentaire à introduire un tiret, qui fait échouer la comparaison. |
+
+Le nom de projet seul ne prouve donc rien : c'est le triplet préfixe + hash + suffixe qui l'établit.
+
+### URLs de branche : non autorisées
+
+Les URLs de branche (`https://<projet>-git-<branche>-<team>.vercel.app`) sont **refusées**. Leur segment central est de forme libre (`git-ma-branche`), donc structurellement indistinguable du nom d'un autre projet préfixé par le nôtre — les autoriser rouvrirait exactement le trou que le hash referme.
+
+**Pour tester une preview contre l'API, utiliser l'URL commit** : dans Vercel, ouvrir le déploiement et prendre le lien *View deployment* (celui qui contient le hash), pas l'URL de branche.
+
+### Risque résiduel assumé
+
+Sur un domaine partagé comme `vercel.app`, aucune règle de forme n'est absolue : quelqu'un qui créerait un projet nommé littéralement `<projet>-<9 alphanumériques>-<team>` obtiendrait un alias de production correspondant au motif. Cela suppose de deviner et de réserver ce nom exact avant nous. Si ce risque devient gênant, la parade est une liste explicite d'URLs de preview autorisées plutôt qu'un motif.
 
 ### À ajouter dans Render
 

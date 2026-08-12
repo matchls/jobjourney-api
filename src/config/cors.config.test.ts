@@ -75,22 +75,73 @@ describe("CORS — previews Vercel du projet declare", () => {
     assert.equal(isAllowedOrigin(PREVIEW), true);
   });
 
-  test("autorise une preview de branche git", () => {
-    configureProduction();
-
-    assert.equal(
-      isAllowedOrigin(
-        `https://${PROJECT}-git-fix-25-vercel-preview-cors-${TEAM}.vercel.app`,
-      ),
-      true,
-    );
-  });
-
   test("refuse un autre projet Vercel de la meme team", () => {
     configureProduction();
 
     assert.equal(
       isAllowedOrigin(`https://autre-projet-a1b2c3d4e-${TEAM}.vercel.app`),
+      false,
+    );
+  });
+
+  test("refuse un projet dont le nom est prefixe par le notre", () => {
+    configureProduction();
+
+    // `jobjourney-web-copy` est un AUTRE projet, dans la MEME team : son URL
+    // commence par `jobjourney-web-` et finit par `-<team>`. Seul le format
+    // exact du hash central le distingue du notre.
+    assert.equal(
+      isAllowedOrigin(`https://${PROJECT}-copy-a1b2c3d4e-${TEAM}.vercel.app`),
+      false,
+    );
+    assert.equal(
+      isAllowedOrigin(`https://${PROJECT}-staging-a1b2c3d4e-${TEAM}.vercel.app`),
+      false,
+    );
+    assert.equal(
+      isAllowedOrigin(`https://${PROJECT}-2-a1b2c3d4e-${TEAM}.vercel.app`),
+      false,
+    );
+  });
+
+  test("exige un hash de 9 caracteres alphanumeriques exactement", () => {
+    configureProduction();
+
+    const wrongHashes = [
+      "a1b2c3d4", // 8
+      "a1b2c3d4ef", // 10
+      "a1b2-c3d4", // 9 caracteres mais un tiret
+      "a1b2_c3d4", // 9 caracteres mais un underscore
+      "", // aucun hash
+    ];
+
+    for (const hash of wrongHashes) {
+      const origin = `https://${PROJECT}-${hash}-${TEAM}.vercel.app`;
+      assert.equal(isAllowedOrigin(origin), false, `devrait refuser ${origin}`);
+    }
+
+    // Le format exact, lui, passe.
+    assert.equal(
+      isAllowedOrigin(`https://${PROJECT}-a1b2c3d4e-${TEAM}.vercel.app`),
+      true,
+    );
+  });
+
+  test("refuse les URL de branche git, non distinguables de facon sure", () => {
+    configureProduction();
+
+    // `<projet>-git-<branche>-<team>` a un segment central de forme libre :
+    // rien ne le distingue structurellement du nom d'un autre projet prefixe
+    // par le notre. Hors perimetre de cette issue — utiliser l'URL commit
+    // « View deployment ».
+    assert.equal(
+      isAllowedOrigin(`https://${PROJECT}-git-main-${TEAM}.vercel.app`),
+      false,
+    );
+    assert.equal(
+      isAllowedOrigin(
+        `https://${PROJECT}-git-fix-25-vercel-preview-cors-${TEAM}.vercel.app`,
+      ),
       false,
     );
   });
@@ -131,6 +182,8 @@ describe("CORS — previews Vercel du projet declare", () => {
       // La team apparait, mais pas en fin de label.
       `https://${PROJECT}-a1b2c3d4e-${TEAM}-evil.vercel.app`,
       `https://${PROJECT}-a1b2c3d4e-${TEAM}evil.vercel.app`,
+      // Un autre projet dont le nom commence par le notre.
+      `https://${PROJECT}-copy-a1b2c3d4e-${TEAM}.vercel.app`,
       // vercel.app apparait, mais le domaine enregistrable est ailleurs.
       `https://${PROJECT}-a1b2c3d4e-${TEAM}.vercel.app.evil.net`,
       `https://${PROJECT}-a1b2c3d4e-${TEAM}.vercel.app.evil.app`,

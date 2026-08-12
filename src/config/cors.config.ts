@@ -24,6 +24,19 @@ const VERCEL_APP_LABELS = ["vercel", "app"] as const;
 // `<projet>-<hash>-<team>` + `vercel` + `app`.
 const VERCEL_PREVIEW_LABEL_COUNT = VERCEL_APP_LABELS.length + 1;
 
+// Hash de déploiement Vercel : exactement 9 caractères alphanumériques.
+//
+// C'est CE format qui fait du nom de projet une preuve, et pas seulement un
+// préfixe. Sans lui, `jobjourney-web-copy` — un AUTRE projet, dans la MÊME
+// team — produirait `jobjourney-web-copy-a1b2c3d4e-<team>.vercel.app`, qui
+// commence bien par `jobjourney-web-` et finit bien par `-<team>`. En exigeant
+// que le segment central soit exactement un hash, tout nom de projet
+// supplémentaire y introduit un tiret et fait échouer la comparaison.
+//
+// Le hostname sort de `URL` déjà en minuscules : inutile de couvrir les
+// majuscules ici.
+const VERCEL_DEPLOYMENT_HASH = /^[a-z0-9]{9}$/;
+
 const readEnv = (name: string): string | undefined => {
   const value = process.env[name]?.trim();
   return value ? value : undefined;
@@ -57,15 +70,24 @@ const toOrigin = (value: string): string | undefined => {
 
 // Preview du projet et de la team déclarés, et rien d'autre.
 //
-// La vérification est structurelle : on découpe le hostname en labels DNS et
-// on impose leur nombre exact, plutôt que de chercher une sous-chaîne. Un
-// `includes("vercel.app")` accepterait `vercel.app.attaquant.net`, et un
-// `includes(projet)` accepterait `evil-<projet>-xyz-<team>.vercel.app`.
+// Seule la forme COMMIT est acceptée :
+//   https://<projet>-<hash 9 alphanumériques>-<team>.vercel.app
+// c'est l'URL du bouton « View deployment » d'un commit.
 //
-// Le verrou réel est le SUFFIXE team : le slug est attribué par Vercel, donc
-// personne hors de la team ne peut produire une URL qui s'y termine. Le nom de
-// projet seul ne protégerait rien — n'importe qui peut nommer son projet
-// comme le nôtre.
+// Les URL de branche (`<projet>-git-<branche>-<team>.vercel.app`) sont
+// volontairement REFUSÉES : leur segment central est de forme libre
+// (`git-ma-branche`), donc structurellement indistinguable du nom d'un autre
+// projet préfixé par le nôtre. Les autoriser rouvrirait exactement le trou que
+// le hash referme.
+//
+// La vérification est structurelle sur trois plans, et jamais par sous-chaîne :
+//
+//  1. les labels DNS et leur nombre exact — un `includes("vercel.app")`
+//     accepterait `vercel.app.attaquant.net` ;
+//  2. le SUFFIXE team, verrou principal : le slug est attribué par Vercel, donc
+//     personne hors de la team ne peut produire une URL qui s'y termine ;
+//  3. le HASH, qui transforme le préfixe projet en preuve : sans lui,
+//     `jobjourney-web-copy` — autre projet, même team — passerait.
 const isAllowedVercelPreview = (url: URL): boolean => {
   const project = getCorsVercelProject();
   const team = getCorsVercelTeam();
@@ -98,10 +120,11 @@ const isAllowedVercelPreview = (url: URL): boolean => {
   if (!deployment.startsWith(prefix)) return false;
   if (!deployment.endsWith(suffix)) return false;
 
-  // Il doit rester quelque chose entre les deux (le hash ou `git-<branche>`).
-  // Écarte au passage le cas dégénéré `<projet>-<team>`, où préfixe et suffixe
-  // se chevauchent.
-  return deployment.slice(prefix.length, deployment.length - suffix.length) !== "";
+  // Entre les deux, il doit rester le hash de déploiement et RIEN d'autre.
+  // `slice` renvoie "" quand préfixe et suffixe se chevauchent (cas dégénéré
+  // `<projet>-<team>`), ce que la regex refuse également.
+  const hash = deployment.slice(prefix.length, deployment.length - suffix.length);
+  return VERCEL_DEPLOYMENT_HASH.test(hash);
 };
 
 // Décide si une origine a le droit de parler à l'API.
