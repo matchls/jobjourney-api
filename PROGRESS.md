@@ -35,6 +35,23 @@
   - `PATCH` preparation-task accepte `skillId: null` pour détacher une compétence liée
 - Contrat commun d'extraction d'offre (`job-offer-extraction.validator.ts`) — données uniquement, aucun fournisseur IA branché
 - `POST /applications/parse-offer` — extraction IA d'une offre via Groq, sans créer de candidature
+- CORS : previews Vercel du projet Job Journey autorisées (issue #25) :
+  - Problème : `origin` était une chaîne figée (`CLIENT_URL`), donc toute preview Vercel du frontend se faisait refuser — le site se chargeait mais aucun appel API ne passait
+  - `src/config/cors.config.ts` — toute la règle est isolée là, variables relues à chaque appel (comme `groq.config.ts`) pour que le serveur démarre sans elles et que les tests puissent les poser/retirer
+  - Deux familles d'origines autorisées et **aucune autre** : `CLIENT_URL` exact, et les previews d'**un** projet dans **une** team déclarés via `CORS_VERCEL_PROJECT` + `CORS_VERCEL_TEAM`
+  - **Aucune règle `*.vercel.app`** : le domaine est ouvert à l'inscription, une telle règle donnerait au site de n'importe qui l'accès à l'API avec les cookies de nos utilisateurs (`credentials: true` conservé)
+  - Seule la **forme commit** est acceptée : `https://<projet>-<hash 9 alphanumériques>-<team>.vercel.app`, celle du bouton « View deployment »
+  - Vérification **structurelle**, jamais par `includes` : hostname découpé en labels DNS, exactement `<déploiement>.vercel.app` (3 labels, aucun port), label de déploiement commençant par `<projet>-`, finissant par `-<team>`, et ne contenant entre les deux qu'un hash strict. Écarte `evil-<projet>-x-<team>.vercel.app`, `<projet>-x-<team>.vercel.app.evil.net`, `<projet>-x-<team>evil.vercel.app`
+  - **Deux verrous complémentaires** : le *suffixe team* (le slug est attribué par Vercel, personne hors de la team ne peut produire une URL qui s'y termine) et le *hash exact* (un autre projet de la même team dont le nom commence par le nôtre — `<projet>-copy-a1b2c3d4e-<team>` — passerait sinon, puisqu'il a le bon préfixe et le bon suffixe). Le nom de projet seul ne prouve rien : c'est le triplet préfixe + hash + suffixe qui l'établit
+  - **URLs de branche (`<projet>-git-<branche>-<team>`) refusées** : leur segment central est de forme libre, donc indistinguable du nom d'un autre projet préfixé par le nôtre — les autoriser rouvrirait le trou que le hash referme. Pour tester une preview contre l'API, utiliser l'URL commit « View deployment »
+  - Risque résiduel documenté : sur un domaine partagé, quelqu'un qui réserverait un projet nommé littéralement `<projet>-<9 alphanumériques>-<team>` obtiendrait un alias correspondant au motif. Parade si besoin : liste explicite d'URLs plutôt qu'un motif
+  - **Fail-closed** : si l'une des deux variables manque, aucune preview n'est autorisée et l'API se comporte exactement comme avant
+  - HTTPS obligatoire pour les previews ; `Origin` absent (curl, serveur-à-serveur, health check) toujours accepté — le header n'est posé que par un navigateur, le refuser casserait ces clients sans rien protéger ; localhost inchangé
+  - Origine refusée → `callback(null, false)` (aucun en-tête CORS, le navigateur bloque) et non une `Error`, qui ferait répondre 500 à une requête simplement non autorisée
+  - Origine opaque (`file://`, `data:`, iframe sandboxée) refusée explicitement : `new URL()` en fait la chaîne littérale `"null"`, qui n'est comparable à rien — cas trouvé par les tests
+  - Comparaison sur `URL.origin` des deux côtés : un `CLIENT_URL` avec slash final ne casse plus la production
+  - 21 tests unitaires purs (214 au total, aucune base ni réseau) : prod exacte, slash final, preview commit valide, autre projet, projet préfixé par le nôtre (`-copy`, `-staging`, `-2`), formats de hash invalides (8, 10, tiret, underscore, vide), URLs de branche refusées, autre team, HTTP refusé, 13 lookalikes, casse, configuration incomplète, `Origin` absent, localhost, entrées malformées, forme du délégué
+  - Déploiement : ajouter `CORS_VERCEL_PROJECT` et `CORS_VERCEL_TEAM` dans Render (aucun secret, aucune migration) — voir la section CORS du README
 
 ## 🔄 En cours
 

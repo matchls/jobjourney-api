@@ -4,6 +4,74 @@
 
 Copier `.env.example` vers `.env` et renseigner les valeurs (voir ce fichier pour la liste des variables et leur rôle).
 
+## CORS
+
+L'API accepte les requêtes navigateur de **deux** familles d'origines, et d'aucune autre (`src/config/cors.config.ts`) :
+
+1. l'origine exacte de `CLIENT_URL` (à défaut `http://localhost:3000` en développement) ;
+2. les previews Vercel **d'un seul projet dans une seule team**, déclarés explicitement.
+
+`credentials: true` est conservé : les cookies d'authentification circulent, ce qui rend la restriction d'origine critique.
+
+### Previews Vercel
+
+Seule la **forme commit** est acceptée — celle du bouton *View deployment* d'un commit :
+
+```
+https://<projet>-<hash 9 alphanumériques>-<team>.vercel.app
+```
+
+Deux variables décrivent le projet et la team acceptés :
+
+| Variable | Exemple | Rôle |
+| --- | --- | --- |
+| `CORS_VERCEL_PROJECT` | `jobjourney-web` | Nom du projet Vercel du frontend |
+| `CORS_VERCEL_TEAM` | `mathieu-chales-projects` | Slug de la team Vercel propriétaire |
+
+Les deux sont **optionnelles et sans secret**. Elles sont publiques par nature : ces valeurs apparaissent déjà dans l'URL de chaque preview.
+
+**Fail-closed** : si l'une des deux manque ou est vide, **aucune** preview n'est autorisée et l'API se comporte exactement comme avant (seul `CLIENT_URL` passe).
+
+Règle appliquée, volontairement structurelle :
+
+- HTTPS uniquement — une preview en `http://` est refusée ;
+- hostname découpé en labels DNS, avec **exactement** `<déploiement>.vercel.app` (3 labels, aucun port) ;
+- le label de déploiement doit commencer par `<projet>-`, finir par `-<team>`, et **ne contenir entre les deux qu'un hash de 9 caractères alphanumériques**.
+
+Il n'y a **aucune** règle `*.vercel.app` : ce domaine est ouvert à l'inscription, une telle règle autoriserait le site de n'importe qui à parler à l'API avec les cookies de nos utilisateurs. La comparaison ne fait jamais de `includes` : `evil-jobjourney-web-x-team.vercel.app`, `jobjourney-web-x-team.vercel.app.evil.net` et `jobjourney-web-x-teamevil.vercel.app` sont tous refusés.
+
+Deux vérifications portent le poids de la sécurité, et elles sont complémentaires :
+
+| Vérification | Ce qu'elle empêche |
+| --- | --- |
+| **Suffixe team** | Le slug est attribué par Vercel : personne **hors de la team** ne peut produire une URL qui s'y termine. |
+| **Hash exact** | Un autre projet **de la même team** dont le nom commence par le nôtre. Sans lui, `jobjourney-web-copy-a1b2c3d4e-<team>.vercel.app` passerait — il commence bien par `jobjourney-web-` et finit bien par `-<team>`. Exiger un hash strict force tout nom de projet supplémentaire à introduire un tiret, qui fait échouer la comparaison. |
+
+Le nom de projet seul ne prouve donc rien : c'est le triplet préfixe + hash + suffixe qui l'établit.
+
+### URLs de branche : non autorisées
+
+Les URLs de branche (`https://<projet>-git-<branche>-<team>.vercel.app`) sont **refusées**. Leur segment central est de forme libre (`git-ma-branche`), donc structurellement indistinguable du nom d'un autre projet préfixé par le nôtre — les autoriser rouvrirait exactement le trou que le hash referme.
+
+**Pour tester une preview contre l'API, utiliser l'URL commit** : dans Vercel, ouvrir le déploiement et prendre le lien *View deployment* (celui qui contient le hash), pas l'URL de branche.
+
+### Risque résiduel assumé
+
+Sur un domaine partagé comme `vercel.app`, aucune règle de forme n'est absolue : quelqu'un qui créerait un projet nommé littéralement `<projet>-<9 alphanumériques>-<team>` obtiendrait un alias de production correspondant au motif. Cela suppose de deviner et de réserver ce nom exact avant nous. Si ce risque devient gênant, la parade est une liste explicite d'URLs de preview autorisées plutôt qu'un motif.
+
+### À ajouter dans Render
+
+Dans *Environment* du service API, ajouter ces deux variables (aucun secret, aucune migration, aucun redéploiement du frontend nécessaire) :
+
+```
+CORS_VERCEL_PROJECT=jobjourney-web
+CORS_VERCEL_TEAM=<slug-de-la-team-vercel>
+```
+
+Le slug de team se lit dans l'URL d'une preview existante : c'est le segment juste avant `.vercel.app`. Vérifier aussi que `CLIENT_URL` pointe bien sur le domaine de production du frontend — il reste la seule origine de production autorisée.
+
+Sans ces variables, l'API démarre et fonctionne normalement : seules les previews restent bloquées.
+
 ## Authentification
 
 - Email/mot de passe : `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
