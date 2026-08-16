@@ -51,6 +51,26 @@ export const createApplication = async (
   userId: string,
   data: CreateApplicationInput,
 ) => {
+  // Same duplicate rule as POST /agent/applications and PATCH
+  // /applications/:id — the shared lookup recomputes each existing
+  // application's fingerprint live (see agent-dedup.ts), so this catches a
+  // duplicate against MANUAL rows too, whose agentDedupKey is always null.
+  //
+  // agentDedupKey is deliberately NOT written here: it stays an
+  // import-only column, and its @@unique([userId, agentDedupKey])
+  // constraint would turn a deliberately replayed application into a
+  // permanent DB-level error instead of a rule we can relax later.
+  const duplicate = await findApplicationMatchingDedupKey(prisma, userId, {
+    offerUrl: data.offerUrl,
+    company: data.company,
+    position: data.position,
+    location: data.location,
+  });
+
+  if (duplicate) {
+    throw new ApplicationDuplicateError();
+  }
+
   return prisma.application.create({
     data: { ...data, userId, statusChangedAt: new Date() },
   });

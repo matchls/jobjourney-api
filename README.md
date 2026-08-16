@@ -127,6 +127,45 @@ Seuls `offerText`, `offerUrl` et `sourceHint` sont envoyés au fournisseur. Aucu
 
 20 requêtes / 10 minutes, indexé par utilisateur (`src/middlewares/parse-offer-rate-limit.middleware.ts`). Chaque appel consomme du quota Groq payant, d'où une limite plus basse que celle du flux agent. Même réserve que pour l'agent : compteur en mémoire, **local à chaque instance Render**.
 
+## Détection des doublons de candidature
+
+Une même empreinte est partagée par les trois routes qui peuvent créer ou modifier une candidature (`src/utils/agent-dedup.ts` + `src/services/application-dedup-lookup.service.ts`). Il n'y a **pas** de seconde logique de comparaison propre à la création manuelle.
+
+### La règle d'empreinte
+
+Deux candidatures du **même utilisateur** sont considérées comme la même dès que :
+
+- **les deux ont une `offerUrl`** → seules les URL normalisées sont comparées. Deux annonces réellement différentes chez le même employeur ne sont donc jamais fusionnées sous prétexte que l'entreprise et le poste se ressemblent. La normalisation retire le fragment (`#...`) et les paramètres de suivi (`utm_*`, `gclid`, `fbclid`), trie les paramètres restants et s'appuie sur le parseur d'URL pour la casse du domaine et les ports par défaut. L'`offerUrl` d'origine est toujours stockée telle quelle : cette normalisation ne sert qu'au calcul de l'empreinte ;
+- **l'un des deux n'a pas d'`offerUrl`** → comparaison sur `entreprise + poste + localisation` normalisés (NFKC, espaces compactés, minuscules). Une candidature saisie sans lien peut donc être reconnue comme identique à une candidature importée avec lien, et inversement.
+
+La normalisation du texte **ne supprime pas les accents** : « Developpeur » et « Développeur » restent deux valeurs différentes.
+
+La comparaison recalcule l'empreinte à la volée depuis les champs courants de chaque candidature, sans dépendre de la colonne `agentDedupKey`. Elle attrape donc aussi les candidatures saisies à la main (dont `agentDedupKey` vaut toujours `null`), celles créées avant cette fonctionnalité, et celles dont les champs ont été corrigés depuis.
+
+### Comportement par route
+
+| Route | Comportement sur doublon |
+| --- | --- |
+| `POST /applications` (saisie manuelle et préremplissage IA) | **Refus `409`** : `{ "error": { "code": "application_duplicate" } }`. Rien n'est créé. |
+| `POST /agent/applications` | `200` avec `{ "status": "duplicate", "duplicate": true, "applicationId": "..." }` — inchangé. |
+| `PATCH /applications/:id` | `409 application_duplicate` si la modification rendrait une candidature **importée par agent** identique à une autre — inchangé. |
+
+`POST /applications` est le seul endpoint de création côté utilisateur : la règle est donc strictement la même que la candidature soit tapée à la main ou préremplie par l'import IA (#17/#23), puisque les deux passent par cette route.
+
+### Pourquoi un refus plutôt qu'une création signalée
+
+L'issue #21 laissait le choix entre refuser et créer en signalant. Le refus `409` a été retenu pour deux raisons : il aligne la création sur `PATCH /applications/:id`, qui refusait déjà avec le même code et la même forme de corps (le frontend n'a donc qu'un seul contrat de doublon à gérer) ; et il empêche la pollution du Kanban, du tableau de bord et des statistiques de progression, qui était le vrai coût décrit dans l'issue.
+
+Contrepartie assumée : re-candidater plus tard au même poste est bloqué par l'API tant que l'ancienne candidature existe. Le contournement est de modifier ou de supprimer l'ancienne ligne. Si ce cas devient gênant, la voie prévue est une confirmation explicite côté client (un `force` sur la requête), pas un assouplissement de l'empreinte.
+
+### Pas de contrainte d'unicité en base
+
+La vérification est applicative uniquement. Aucune contrainte `@@unique` ni migration n'a été ajoutée pour cette règle, et `agentDedupKey` reste une colonne réservée à l'import agent — une création manuelle ne l'écrit jamais. Une contrainte en base transformerait une candidature volontairement rejouée en erreur définitive, alors que la règle doit rester assouplissable.
+
+Conséquence à connaître : le contrôle lit puis écrit sans transaction sérialisable (contrairement à `POST /agent/applications`, protégé par sa contrainte `@@unique([userId, agentDedupKey])` et son isolation `SERIALIZABLE`). Deux requêtes manuelles vraiment simultanées pour la même offre — un double-clic sur « Créer » — peuvent donc encore passer toutes les deux. Le frontend doit désactiver le bouton de soumission pendant l'appel.
+
+La recherche parcourt toutes les candidatures de l'utilisateur et recalcule chaque empreinte (`O(n)`), ce qui reste adapté aux volumes d'un suivi personnel. À revoir avec une colonne générée et indexée si ce n'est plus vrai.
+
 ## Import de candidatures par agent (V1.1)
 
 Workflow dédié pour permettre à un agent externe (pas un navigateur, pas un utilisateur) de créer des candidatures sans jamais toucher à SQL, aux cookies utilisateurs, ni à la lecture/modification/suppression de données : `agent → JSON → validation Zod → service applicatif → Prisma`.

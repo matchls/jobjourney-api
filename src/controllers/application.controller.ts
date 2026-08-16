@@ -33,11 +33,21 @@ export const createApplication = async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const application = await applicationService.createApplication(
-    req.userId!,
-    parsed.data,
-  );
-  res.status(201).json(application);
+  try {
+    const application = await applicationService.createApplication(
+      req.userId!,
+      parsed.data,
+    );
+    res.status(201).json(application);
+  } catch (error) {
+    // Same status and payload shape as PATCH /applications/:id, so the
+    // frontend can handle one duplicate contract rather than two.
+    if (error instanceof ApplicationDuplicateError) {
+      res.status(409).json({ error: { code: "application_duplicate" } });
+      return;
+    }
+    throw error;
+  }
 };
 
 export const updateApplication = async (req: AuthRequest, res: Response) => {
