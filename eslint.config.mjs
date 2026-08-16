@@ -1,8 +1,16 @@
 // Configuration ESLint (format « flat config », ESLint 9).
 //
-// Objectif principal : détecter le code mort — variables, imports et exports
-// jamais utilisés — que `tsc` ne signale pas. Le compilateur vérifie les types,
-// pas l'hygiène du code : un symbole exporté et jamais importé compile très bien.
+// Objectif principal : détecter les variables et les imports jamais utilisés
+// à l'intérieur d'un fichier, ce que `tsc` ne signale pas — le compilateur
+// vérifie les types, pas l'hygiène du code.
+//
+// PORTÉE À CONNAÎTRE : `no-unused-vars` raisonne fichier par fichier et
+// considère tout symbole `export`é comme utilisé, faute de savoir ce que font
+// les autres fichiers. Un **export mort** — exporté, jamais importé nulle part —
+// n'est donc PAS détecté par cette configuration. Le repérer demande une
+// analyse inter-fichiers du graphe d'imports, faite par un outil dédié
+// (`knip`, `ts-prune`) qui n'est pas installé ici. En attendant, un export
+// suspect se vérifie à la main (`git grep -n <symbole>`).
 //
 // Le fichier est en .mjs car le projet est en CommonJS : l'extension force Node
 // à le lire comme un module ES, ce qui permet la syntaxe `import` ici sans
