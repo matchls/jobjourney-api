@@ -504,10 +504,81 @@ Conséquences pratiques :
 
 60 requêtes / 10 minutes, indexé par clé API (jamais sur les routes utilisateur classiques). Implémentation en mémoire (`src/middlewares/agent-rate-limit.middleware.ts`) : **limite locale à chaque instance Render**, pas de compteur partagé entre instances. Suffisant pour une seule instance ; prévoir un store partagé (Redis) avant de scaler horizontalement.
 
-### Déploiement
-
-Nouvelle migration `secure_agent_application_import` à appliquer sur Render via `npx prisma migrate deploy` avant le déploiement du code (pas exécutée automatiquement par ce dépôt). Ajouter `AGENT_API_KEY_PEPPER` aux variables d'environnement Render — sans elle, `/agent/*` répond `503` mais le reste de l'API continue de fonctionner normalement.
-
 ### Sécurité
 
 L'agent n'a **aucun accès SQL**, aucune route de lecture, de modification ou de suppression — uniquement `POST /agent/applications` avec le scope `applications:create`. Toute autre tentative (scope insuffisant, méthode/route différente) est refusée par le middleware avant d'atteindre Prisma.
+
+## Déploiement
+
+Suivre cette seule section suffit à déployer l'API complète sur Render, extraction IA comprise. Le rôle détaillé de chaque variable reste dans `.env.example` ; ici on ne liste que ce qui demande une action côté Render.
+
+Deux règles valables pour toutes les variables ci-dessous :
+
+- **Render redéploie le service à chaque modification de variable.** Une valeur ajoutée ne prend effet qu'une fois ce redéploiement terminé — inutile de tester avant.
+- **Une variable vide ou ne contenant que des espaces équivaut à une variable absente.** Les valeurs sont lues avec `.trim()` puis traitées comme non renseignées si le résultat est vide (`src/config/groq.config.ts`).
+
+### Migrations Prisma
+
+`npx prisma migrate deploy` n'est **pas** exécuté automatiquement par ce dépôt : il faut l'appliquer avant de déployer le code qui en dépend.
+
+À ce jour, la dernière migration est `20260801100352_secure_agent_application_import` (import par agent). **L'extraction IA (#16 et #17) n'a introduit aucune migration** : elle n'ajoute ni table, ni colonne, ni index. `POST /applications/parse-offer` n'écrit rien en base — le service métier n'importe même pas Prisma. Déployer l'extraction IA ne demande donc que des variables d'environnement.
+
+### Import par agent
+
+| Variable | Obligatoire | Effet si absente |
+| --- | --- | --- |
+| `AGENT_API_KEY_PEPPER` | Oui, pour activer `/agent/*` | `/agent/*` répond `503` ; le reste de l'API fonctionne normalement |
+
+Ne jamais réutiliser la valeur de `JWT_SECRET`.
+
+### Extraction IA d'une offre
+
+| Variable | Obligatoire | Défaut si absente | Effet |
+| --- | --- | --- | --- |
+| `GROQ_API_KEY` | Oui, pour activer la feature | — | Sans elle, `POST /applications/parse-offer` répond `503 extraction_not_configured` |
+| `GROQ_MODEL` | Non | `openai/gpt-oss-120b` | Seuls certains modèles Groq supportent le strict mode des structured outputs — voir la [documentation Groq](https://console.groq.com/docs/structured-outputs) avant d'en changer |
+| `GROQ_TIMEOUT_MS` | Non | `20000` | Plafonné à `60000` : une valeur supérieure est ramenée au plafond, une valeur invalide ou ≤ 0 retombe sur le défaut |
+
+`GROQ_API_KEY` est un **secret** : à saisir directement dans *Environment* sur Render, jamais dans le dépôt, jamais dans un ticket ou une conversation. Elle n'est jamais envoyée au navigateur, jamais journalisée, jamais incluse dans une réponse d'erreur.
+
+**Comportement sans clé — l'API reste entièrement fonctionnelle.** Le serveur démarre normalement et toutes les routes manuelles répondent comme d'habitude. Seul `POST /applications/parse-offer` échoue, avec :
+
+```json
+{ "error": { "code": "extraction_not_configured" } }
+```
+
+renvoyé en `503`. La création manuelle d'une candidature (`POST /applications`) n'est jamais affectée. C'est ce qui rend l'oubli silencieux : rien ne plante au démarrage, la feature semble simplement « indisponible ».
+
+**Piège à connaître :** une clé *présente mais invalide* (faute de frappe, clé révoquée) produit **exactement le même** `503 extraction_not_configured`. Groq répond `401`/`403`, et l'API les traduit dans ce code unique plutôt que d'exposer un détail de configuration. Donc un `503` après avoir renseigné la variable ne veut pas dire « variable non prise en compte » — il faut aussi soupçonner la valeur elle-même.
+
+### Vérifier après déploiement
+
+Une fois le redéploiement terminé, cinq étapes. Remplacer les valeurs entre `<>` par les vôtres ; aucune n'est un secret à écrire dans le dépôt.
+
+**1.** Dans Render → *Environment*, confirmer que `GROQ_API_KEY` est présente et non vide.
+
+**2.** Se connecter et conserver le cookie de session :
+
+```bash
+curl -s -c cookies.txt -X POST https://jobjourney-api.onrender.com/auth/login -H "Content-Type: application/json" -d '{"email":"<votre-email>","password":"<votre-mot-de-passe>"}'
+```
+
+**3.** Appeler l'extraction avec une annonce minimale, en affichant le code HTTP :
+
+```bash
+curl -s -b cookies.txt -o reponse.json -w "%{http_code}\n" -X POST https://jobjourney-api.onrender.com/applications/parse-offer -H "Content-Type: application/json" -d '{"offerText":"Developpeur backend Node.js en CDI a Lyon chez Acme."}'
+```
+
+**4.** Lire le code obtenu :
+
+| Code | Interprétation |
+| --- | --- |
+| `200` | ✅ La clé est prise en compte. `reponse.json` contient `fields` avec au moins `company` et `position` renseignés |
+| `503` | ❌ `GROQ_API_KEY` absente **ou** invalide — vérifier la présence de la variable, puis sa valeur |
+| `504` / `502` | ⚠️ La clé est bien prise en compte : l'appel est parti et c'est le fournisseur qui n'a pas répondu. La configuration est bonne, réessayer plus tard |
+| `429` | ⚠️ Quota atteint (20 requêtes / 10 min par utilisateur, ou quota Groq). La configuration est bonne |
+| `401` | La session a expiré — refaire l'étape 2 |
+
+Ce test **ne crée aucune candidature** : l'endpoint ne fait que renvoyer un aperçu, il n'écrit jamais en base. Il peut donc être lancé sans risque sur l'instance de production.
+
+**5.** Supprimer le fichier de session : `rm cookies.txt`.
