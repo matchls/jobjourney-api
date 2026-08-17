@@ -512,10 +512,9 @@ L'agent n'a **aucun accès SQL**, aucune route de lecture, de modification ou de
 
 Suivre cette seule section suffit à déployer l'API complète sur Render, extraction IA comprise. Le rôle détaillé de chaque variable reste dans `.env.example` ; ici on ne liste que ce qui demande une action côté Render.
 
-Deux règles valables pour toutes les variables ci-dessous :
+Règle valable pour toutes les variables ci-dessous : **une variable modifiée n'est utilisée par le service qu'à partir d'un déploiement lancé avec cette nouvelle configuration.** Selon l'action choisie au moment d'enregistrer, Render peut déclencher ce déploiement immédiatement ou seulement sauvegarder la valeur pour le prochain. Avant de tester `GROQ_API_KEY`, s'assurer donc qu'un déploiement postérieur à l'enregistrement est bien terminé — au besoin en le déclenchant manuellement.
 
-- **Une variable modifiée n'est utilisée par le service qu'à partir d'un déploiement lancé avec cette nouvelle configuration.** Selon l'action choisie au moment d'enregistrer, Render peut déclencher ce déploiement immédiatement ou seulement sauvegarder la valeur pour le prochain. Avant de tester `GROQ_API_KEY`, s'assurer donc qu'un déploiement postérieur à l'enregistrement est bien terminé — au besoin en le déclenchant manuellement.
-- **Une variable vide ou ne contenant que des espaces équivaut à une variable absente.** Les valeurs sont lues avec `.trim()` puis traitées comme non renseignées si le résultat est vide (`src/config/groq.config.ts`).
+La manière dont une valeur vide est traitée, en revanche, **dépend de la variable** : voir chaque section ci-dessous.
 
 ### Migrations Prisma
 
@@ -531,6 +530,8 @@ Deux règles valables pour toutes les variables ci-dessous :
 
 Ne jamais réutiliser la valeur de `JWT_SECRET`.
 
+Cette variable est contrôlée par simple présence (`if (!process.env.AGENT_API_KEY_PEPPER)`), **sans `.trim()`** : une valeur vide est bien traitée comme absente, mais une valeur ne contenant que des espaces passe le contrôle et servirait telle quelle de sel. À renseigner avec une vraie valeur, jamais avec un espace pour « désactiver ».
+
 ### Extraction IA d'une offre
 
 | Variable | Obligatoire | Défaut si absente | Effet |
@@ -538,6 +539,8 @@ Ne jamais réutiliser la valeur de `JWT_SECRET`.
 | `GROQ_API_KEY` | Oui, pour activer la feature | — | Sans elle, `POST /applications/parse-offer` répond `503 extraction_not_configured` |
 | `GROQ_MODEL` | Non | `openai/gpt-oss-120b` | Seuls certains modèles Groq supportent le strict mode des structured outputs — voir la [documentation Groq](https://console.groq.com/docs/structured-outputs) avant d'en changer |
 | `GROQ_TIMEOUT_MS` | Non | `20000` | Plafonné à `60000` : une valeur supérieure est ramenée au plafond, une valeur invalide ou ≤ 0 retombe sur le défaut |
+
+`GROQ_API_KEY` et `GROQ_MODEL` sont normalisées avec `.trim()` (`src/config/groq.config.ts`) : une valeur vide **ou ne contenant que des espaces** est traitée comme non renseignée, et le défaut s'applique. `GROQ_TIMEOUT_MS` n'est pas normalisée de la même façon — elle est convertie en nombre, et toute valeur non exploitable retombe sur le défaut.
 
 `GROQ_API_KEY` est un **secret** : à saisir directement dans *Environment* sur Render, jamais dans le dépôt, jamais dans un ticket ou une conversation. Elle n'est jamais envoyée au navigateur, jamais journalisée, jamais incluse dans une réponse d'erreur.
 
@@ -549,14 +552,16 @@ Ne jamais réutiliser la valeur de `JWT_SECRET`.
 
 renvoyé en `503`. La création manuelle d'une candidature (`POST /applications`) n'est jamais affectée. C'est ce qui rend l'oubli silencieux : rien ne plante au démarrage, la feature semble simplement « indisponible ».
 
-**Piège à connaître : `extraction_not_configured` couvre plus que « variable absente ».** Ce code signifie que l'API n'a pas de clé exploitable **ou** que Groq a refusé l'authentification ou l'autorisation — les réponses `401` et `403` du fournisseur sont toutes deux traduites dans ce code unique, plutôt que d'exposer un détail de configuration. Un `403` peut recouvrir autre chose qu'une clé fausse : droit manquant sur le modèle demandé, restriction de compte, quota ou facturation.
+**Piège à connaître : `extraction_not_configured` couvre plus que « variable absente ».** Ce code signifie que l'API n'a pas de clé exploitable **ou** que Groq a refusé l'authentification ou l'autorisation — les réponses `401` et `403` du fournisseur sont toutes deux traduites dans ce code unique, plutôt que d'exposer un détail de configuration. Un `403` est un refus d'autorisation : la clé a été reconnue, mais la permission nécessaire manque, par exemple un accès refusé au modèle demandé.
 
 Face à un `503`, vérifier dans cet ordre :
 
 1. `GROQ_API_KEY` est bien présente côté Render, et le service a été déployé après son enregistrement ;
-2. la valeur ne comporte pas de faute de frappe (espace ou saut de ligne collé par erreur, valeur tronquée) ;
+2. la valeur ne comporte pas de faute de frappe (saut de ligne collé par erreur, valeur tronquée) ;
 3. la clé est toujours valide et non révoquée côté Groq ;
-4. si la clé semble correcte, regarder les autorisations du compte Groq — notamment l'accès au modèle configuré par `GROQ_MODEL`, ainsi que l'état du quota et de la facturation.
+4. si la clé semble correcte, regarder les permissions du compte Groq, notamment l'accès au modèle configuré par `GROQ_MODEL`.
+
+Le rate limit et les quotas ne se manifestent pas ici mais en `429` — voir la table ci-dessous.
 
 ### Vérifier après déploiement
 
