@@ -504,10 +504,109 @@ Conséquences pratiques :
 
 60 requêtes / 10 minutes, indexé par clé API (jamais sur les routes utilisateur classiques). Implémentation en mémoire (`src/middlewares/agent-rate-limit.middleware.ts`) : **limite locale à chaque instance Render**, pas de compteur partagé entre instances. Suffisant pour une seule instance ; prévoir un store partagé (Redis) avant de scaler horizontalement.
 
-### Déploiement
-
-Nouvelle migration `secure_agent_application_import` à appliquer sur Render via `npx prisma migrate deploy` avant le déploiement du code (pas exécutée automatiquement par ce dépôt). Ajouter `AGENT_API_KEY_PEPPER` aux variables d'environnement Render — sans elle, `/agent/*` répond `503` mais le reste de l'API continue de fonctionner normalement.
-
 ### Sécurité
 
 L'agent n'a **aucun accès SQL**, aucune route de lecture, de modification ou de suppression — uniquement `POST /agent/applications` avec le scope `applications:create`. Toute autre tentative (scope insuffisant, méthode/route différente) est refusée par le middleware avant d'atteindre Prisma.
+
+## Déploiement
+
+Suivre cette seule section suffit à déployer l'API complète sur Render, extraction IA comprise. Le rôle détaillé de chaque variable reste dans `.env.example` ; ici on ne liste que ce qui demande une action côté Render.
+
+Règle valable pour toutes les variables ci-dessous : **une variable modifiée n'est utilisée par le service qu'à partir d'un déploiement lancé avec cette nouvelle configuration.** Selon l'action choisie au moment d'enregistrer, Render peut déclencher ce déploiement immédiatement ou seulement sauvegarder la valeur pour le prochain. Avant de tester `GROQ_API_KEY`, s'assurer donc qu'un déploiement postérieur à l'enregistrement est bien terminé — au besoin en le déclenchant manuellement.
+
+La manière dont une valeur vide est traitée, en revanche, **dépend de la variable** : voir chaque section ci-dessous.
+
+### Migrations Prisma
+
+`npx prisma migrate deploy` n'est **pas** exécuté automatiquement par ce dépôt : il faut l'appliquer avant de déployer le code qui en dépend.
+
+À ce jour, la dernière migration est `20260801100352_secure_agent_application_import` (import par agent). **L'extraction IA (#16 et #17) n'a introduit aucune migration** : elle n'ajoute ni table, ni colonne, ni index. `POST /applications/parse-offer` n'écrit rien en base — le service métier n'importe même pas Prisma. Déployer l'extraction IA ne demande donc que des variables d'environnement.
+
+### Import par agent
+
+| Variable | Obligatoire | Effet si absente |
+| --- | --- | --- |
+| `AGENT_API_KEY_PEPPER` | Oui, pour activer `/agent/*` | `/agent/*` répond `503` ; le reste de l'API fonctionne normalement |
+
+Ne jamais réutiliser la valeur de `JWT_SECRET`.
+
+Cette variable est contrôlée par simple présence (`if (!process.env.AGENT_API_KEY_PEPPER)`), **sans `.trim()`** : une valeur vide est bien traitée comme absente, mais une valeur ne contenant que des espaces passe le contrôle et servirait telle quelle de sel. À renseigner avec une vraie valeur, jamais avec un espace pour « désactiver ».
+
+### Extraction IA d'une offre
+
+| Variable | Obligatoire | Défaut si absente | Effet |
+| --- | --- | --- | --- |
+| `GROQ_API_KEY` | Oui, pour activer la feature | — | Sans elle, `POST /applications/parse-offer` répond `503 extraction_not_configured` |
+| `GROQ_MODEL` | Non | `openai/gpt-oss-120b` | Seuls certains modèles Groq supportent le strict mode des structured outputs — voir la [documentation Groq](https://console.groq.com/docs/structured-outputs) avant d'en changer |
+| `GROQ_TIMEOUT_MS` | Non | `20000` | Plafonné à `60000` : une valeur supérieure est ramenée au plafond, une valeur invalide ou ≤ 0 retombe sur le défaut |
+
+`GROQ_API_KEY` et `GROQ_MODEL` sont normalisées avec `.trim()` (`src/config/groq.config.ts`) : une valeur vide **ou ne contenant que des espaces** est traitée comme non renseignée. La conséquence, elle, diffère — seule `GROQ_MODEL` a un défaut :
+
+- `GROQ_API_KEY` non renseignée → aucune clé exploitable, `POST /applications/parse-offer` répond `503 extraction_not_configured` ;
+- `GROQ_MODEL` non renseignée → le défaut `openai/gpt-oss-120b` s'applique.
+
+`GROQ_TIMEOUT_MS` n'est pas normalisée de la même façon — elle est convertie en nombre, et toute valeur non exploitable retombe sur le défaut.
+
+`GROQ_API_KEY` est un **secret** : à saisir directement dans *Environment* sur Render, jamais dans le dépôt, jamais dans un ticket ou une conversation. Elle n'est jamais envoyée au navigateur, jamais journalisée, jamais incluse dans une réponse d'erreur.
+
+**Comportement sans clé — l'API reste entièrement fonctionnelle.** Le serveur démarre normalement et toutes les routes manuelles répondent comme d'habitude. Seul `POST /applications/parse-offer` échoue, avec :
+
+```json
+{ "error": { "code": "extraction_not_configured" } }
+```
+
+renvoyé en `503`. La création manuelle d'une candidature (`POST /applications`) n'est jamais affectée. C'est ce qui rend l'oubli silencieux : rien ne plante au démarrage, la feature semble simplement « indisponible ».
+
+**Piège à connaître : `extraction_not_configured` couvre plus que « variable absente ».** Ce code signifie que l'API n'a pas de clé exploitable **ou** que Groq a refusé l'authentification ou l'autorisation — les réponses `401` et `403` du fournisseur sont toutes deux traduites dans ce code unique, plutôt que d'exposer un détail de configuration. Un `403` est un refus d'autorisation : la clé a été reconnue, mais la permission nécessaire manque, par exemple un accès refusé au modèle demandé.
+
+Face à un `503`, vérifier dans cet ordre :
+
+1. `GROQ_API_KEY` est bien présente côté Render, et le service a été déployé après son enregistrement ;
+2. la valeur ne comporte pas de faute de frappe (saut de ligne collé par erreur, valeur tronquée) ;
+3. la clé est toujours valide et non révoquée côté Groq ;
+4. si la clé semble correcte, regarder les permissions du compte Groq, notamment l'accès au modèle configuré par `GROQ_MODEL`.
+
+Le rate limit et les quotas ne se manifestent pas ici mais en `429` — voir la table ci-dessous.
+
+### Vérifier après déploiement
+
+Cinq étapes, à lancer une fois qu'un déploiement postérieur à l'enregistrement des variables est terminé. Remplacer les valeurs entre `<>` par les vôtres ; aucune n'est un secret à écrire dans le dépôt.
+
+**1.** Dans Render → *Environment*, confirmer que `GROQ_API_KEY` est présente et non vide, et que le service a bien été déployé depuis son enregistrement.
+
+**2.** Se connecter et conserver le cookie de session :
+
+```bash
+curl -s -c cookies.txt -X POST https://jobjourney-api.onrender.com/auth/login -H "Content-Type: application/json" -d '{"email":"<votre-email>","password":"<votre-mot-de-passe>"}'
+```
+
+**3.** Appeler l'extraction avec une annonce minimale, en affichant le code HTTP :
+
+```bash
+curl -s -b cookies.txt -o reponse.json -w "%{http_code}\n" -X POST https://jobjourney-api.onrender.com/applications/parse-offer -H "Content-Type: application/json" -d '{"offerText":"Developpeur backend Node.js en CDI a Lyon chez Acme."}'
+```
+
+**4.** Lire le code HTTP obtenu, **et** le champ `error.code` de `reponse.json` : à statut égal, c'est lui qui distingue les causes.
+
+| HTTP | `error.code` | Interprétation |
+| --- | --- | --- |
+| `200` | — | ✅ Extraction opérationnelle. `reponse.json` contient `fields`, avec `company` et `position` renseignés pour l'annonce d'exemple |
+| `503` | `extraction_not_configured` | Aucune clé exploitable côté API, **ou** authentification/autorisation refusée par Groq (`401`/`403`). Suivre la liste de vérification ci-dessus |
+| `504` | `extraction_timeout` | L'extraction n'a pas abouti dans le délai configuré. Consulter l'état du service Groq, éventuellement revoir `GROQ_TIMEOUT_MS`, et réessayer avant toute autre action |
+| `502` | `extraction_unavailable` | Fournisseur injoignable ou en erreur, ou panne réseau. Réessayer, puis inspecter les logs si cela persiste |
+| `502` | `extraction_invalid_response` | Groq a répondu, mais d'une manière inutilisable (JSON invalide, enveloppe inattendue, réponse hors contrat). Réessayer, puis inspecter les logs si cela persiste |
+| `429` | `rate_limited` | Limite **locale** de l'API atteinte (20 requêtes / 10 minutes par utilisateur). Aucun appel n'a été envoyé à Groq. L'en-tête `Retry-After` indique le délai |
+| `429` | `extraction_rate_limited` | Limite ou quota **Groq** atteint |
+| `401` | `unauthorized` | Session absente ou expirée — refaire l'étape 2 |
+
+**Ce que ces codes ne prouvent pas.** Seul un `200` atteste que la chaîne complète fonctionne.
+
+- Un `429` ne dit pas, à lui seul, qu'un appel a réellement atteint Groq : la limite locale répond avant tout envoi. C'est `error.code` qui tranche.
+- Un `502` montre que l'exécution est allée au-delà du simple contrôle local de présence de la clé, mais ne certifie pas pour autant que toute la configuration Groq est correcte. `extraction_unavailable` peut venir d'une panne réseau survenue avant tout échange, tandis qu'`extraction_invalid_response` n'est atteignable qu'après une réponse HTTP acceptée du fournisseur.
+- Un `504` indique seulement que le délai a été dépassé, sans rien conclure sur la validité de la clé.
+
+En cas de doute persistant, réessayer d'abord — les incidents fournisseur sont fréquents et transitoires — puis consulter les logs du service, qui enregistrent le code d'erreur et la durée de chaque tentative sans jamais contenir le texte de l'offre ni la clé.
+
+Ce test **ne crée aucune candidature** : l'endpoint ne fait que renvoyer un aperçu, il n'écrit jamais en base. Il peut donc être lancé sans risque sur l'instance de production.
+
+**5.** Supprimer le fichier de session : `rm cookies.txt`.
