@@ -514,7 +514,7 @@ Suivre cette seule section suffit à déployer l'API complète sur Render, extra
 
 Deux règles valables pour toutes les variables ci-dessous :
 
-- **Render redéploie le service à chaque modification de variable.** Une valeur ajoutée ne prend effet qu'une fois ce redéploiement terminé — inutile de tester avant.
+- **Une variable modifiée n'est utilisée par le service qu'à partir d'un déploiement lancé avec cette nouvelle configuration.** Selon l'action choisie au moment d'enregistrer, Render peut déclencher ce déploiement immédiatement ou seulement sauvegarder la valeur pour le prochain. Avant de tester `GROQ_API_KEY`, s'assurer donc qu'un déploiement postérieur à l'enregistrement est bien terminé — au besoin en le déclenchant manuellement.
 - **Une variable vide ou ne contenant que des espaces équivaut à une variable absente.** Les valeurs sont lues avec `.trim()` puis traitées comme non renseignées si le résultat est vide (`src/config/groq.config.ts`).
 
 ### Migrations Prisma
@@ -549,13 +549,20 @@ Ne jamais réutiliser la valeur de `JWT_SECRET`.
 
 renvoyé en `503`. La création manuelle d'une candidature (`POST /applications`) n'est jamais affectée. C'est ce qui rend l'oubli silencieux : rien ne plante au démarrage, la feature semble simplement « indisponible ».
 
-**Piège à connaître :** une clé *présente mais invalide* (faute de frappe, clé révoquée) produit **exactement le même** `503 extraction_not_configured`. Groq répond `401`/`403`, et l'API les traduit dans ce code unique plutôt que d'exposer un détail de configuration. Donc un `503` après avoir renseigné la variable ne veut pas dire « variable non prise en compte » — il faut aussi soupçonner la valeur elle-même.
+**Piège à connaître : `extraction_not_configured` couvre plus que « variable absente ».** Ce code signifie que l'API n'a pas de clé exploitable **ou** que Groq a refusé l'authentification ou l'autorisation — les réponses `401` et `403` du fournisseur sont toutes deux traduites dans ce code unique, plutôt que d'exposer un détail de configuration. Un `403` peut recouvrir autre chose qu'une clé fausse : droit manquant sur le modèle demandé, restriction de compte, quota ou facturation.
+
+Face à un `503`, vérifier dans cet ordre :
+
+1. `GROQ_API_KEY` est bien présente côté Render, et le service a été déployé après son enregistrement ;
+2. la valeur ne comporte pas de faute de frappe (espace ou saut de ligne collé par erreur, valeur tronquée) ;
+3. la clé est toujours valide et non révoquée côté Groq ;
+4. si la clé semble correcte, regarder les autorisations du compte Groq — notamment l'accès au modèle configuré par `GROQ_MODEL`, ainsi que l'état du quota et de la facturation.
 
 ### Vérifier après déploiement
 
-Une fois le redéploiement terminé, cinq étapes. Remplacer les valeurs entre `<>` par les vôtres ; aucune n'est un secret à écrire dans le dépôt.
+Cinq étapes, à lancer une fois qu'un déploiement postérieur à l'enregistrement des variables est terminé. Remplacer les valeurs entre `<>` par les vôtres ; aucune n'est un secret à écrire dans le dépôt.
 
-**1.** Dans Render → *Environment*, confirmer que `GROQ_API_KEY` est présente et non vide.
+**1.** Dans Render → *Environment*, confirmer que `GROQ_API_KEY` est présente et non vide, et que le service a bien été déployé depuis son enregistrement.
 
 **2.** Se connecter et conserver le cookie de session :
 
@@ -569,15 +576,26 @@ curl -s -c cookies.txt -X POST https://jobjourney-api.onrender.com/auth/login -H
 curl -s -b cookies.txt -o reponse.json -w "%{http_code}\n" -X POST https://jobjourney-api.onrender.com/applications/parse-offer -H "Content-Type: application/json" -d '{"offerText":"Developpeur backend Node.js en CDI a Lyon chez Acme."}'
 ```
 
-**4.** Lire le code obtenu :
+**4.** Lire le code HTTP obtenu, **et** le champ `error.code` de `reponse.json` : à statut égal, c'est lui qui distingue les causes.
 
-| Code | Interprétation |
-| --- | --- |
-| `200` | ✅ La clé est prise en compte. `reponse.json` contient `fields` avec au moins `company` et `position` renseignés |
-| `503` | ❌ `GROQ_API_KEY` absente **ou** invalide — vérifier la présence de la variable, puis sa valeur |
-| `504` / `502` | ⚠️ La clé est bien prise en compte : l'appel est parti et c'est le fournisseur qui n'a pas répondu. La configuration est bonne, réessayer plus tard |
-| `429` | ⚠️ Quota atteint (20 requêtes / 10 min par utilisateur, ou quota Groq). La configuration est bonne |
-| `401` | La session a expiré — refaire l'étape 2 |
+| HTTP | `error.code` | Interprétation |
+| --- | --- | --- |
+| `200` | — | ✅ Extraction opérationnelle. `reponse.json` contient `fields`, avec `company` et `position` renseignés pour l'annonce d'exemple |
+| `503` | `extraction_not_configured` | Aucune clé exploitable côté API, **ou** authentification/autorisation refusée par Groq (`401`/`403`). Suivre la liste de vérification ci-dessus |
+| `504` | `extraction_timeout` | L'extraction n'a pas abouti dans le délai configuré. Consulter l'état du service Groq, éventuellement revoir `GROQ_TIMEOUT_MS`, et réessayer avant toute autre action |
+| `502` | `extraction_unavailable` | Fournisseur injoignable ou en erreur, ou panne réseau. Réessayer, puis inspecter les logs si cela persiste |
+| `502` | `extraction_invalid_response` | Groq a répondu, mais d'une manière inutilisable (JSON invalide, enveloppe inattendue, réponse hors contrat). Réessayer, puis inspecter les logs si cela persiste |
+| `429` | `rate_limited` | Limite **locale** de l'API atteinte (20 requêtes / 10 minutes par utilisateur). Aucun appel n'a été envoyé à Groq. L'en-tête `Retry-After` indique le délai |
+| `429` | `extraction_rate_limited` | Limite ou quota **Groq** atteint |
+| `401` | `unauthorized` | Session absente ou expirée — refaire l'étape 2 |
+
+**Ce que ces codes ne prouvent pas.** Seul un `200` atteste que la chaîne complète fonctionne.
+
+- Un `429` ne dit pas, à lui seul, qu'un appel a réellement atteint Groq : la limite locale répond avant tout envoi. C'est `error.code` qui tranche.
+- Un `502` montre que l'exécution est allée au-delà du simple contrôle local de présence de la clé, mais ne certifie pas pour autant que toute la configuration Groq est correcte. `extraction_unavailable` peut venir d'une panne réseau survenue avant tout échange, tandis qu'`extraction_invalid_response` n'est atteignable qu'après une réponse HTTP acceptée du fournisseur.
+- Un `504` indique seulement que le délai a été dépassé, sans rien conclure sur la validité de la clé.
+
+En cas de doute persistant, réessayer d'abord — les incidents fournisseur sont fréquents et transitoires — puis consulter les logs du service, qui enregistrent le code d'erreur et la durée de chaque tentative sans jamais contenir le texte de l'offre ni la clé.
 
 Ce test **ne crée aucune candidature** : l'endpoint ne fait que renvoyer un aperçu, il n'écrit jamais en base. Il peut donc être lancé sans risque sur l'instance de production.
 
