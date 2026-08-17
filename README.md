@@ -540,7 +540,12 @@ Cette variable est contrôlée par simple présence (`if (!process.env.AGENT_API
 | `GROQ_MODEL` | Non | `openai/gpt-oss-120b` | Seuls certains modèles Groq supportent le strict mode des structured outputs — voir la [documentation Groq](https://console.groq.com/docs/structured-outputs) avant d'en changer |
 | `GROQ_TIMEOUT_MS` | Non | `20000` | Plafonné à `60000` : une valeur supérieure est ramenée au plafond, une valeur invalide ou ≤ 0 retombe sur le défaut |
 
-`GROQ_API_KEY` et `GROQ_MODEL` sont normalisées avec `.trim()` (`src/config/groq.config.ts`) : une valeur vide **ou ne contenant que des espaces** est traitée comme non renseignée, et le défaut s'applique. `GROQ_TIMEOUT_MS` n'est pas normalisée de la même façon — elle est convertie en nombre, et toute valeur non exploitable retombe sur le défaut.
+`GROQ_API_KEY` et `GROQ_MODEL` sont normalisées avec `.trim()` (`src/config/groq.config.ts`) : une valeur vide **ou ne contenant que des espaces** est traitée comme non renseignée. La conséquence, elle, diffère — seule `GROQ_MODEL` a un défaut :
+
+- `GROQ_API_KEY` non renseignée → aucune clé exploitable, `POST /applications/parse-offer` répond `503 extraction_not_configured` ;
+- `GROQ_MODEL` non renseignée → le défaut `openai/gpt-oss-120b` s'applique.
+
+`GROQ_TIMEOUT_MS` n'est pas normalisée de la même façon — elle est convertie en nombre, et toute valeur non exploitable retombe sur le défaut.
 
 `GROQ_API_KEY` est un **secret** : à saisir directement dans *Environment* sur Render, jamais dans le dépôt, jamais dans un ticket ou une conversation. Elle n'est jamais envoyée au navigateur, jamais journalisée, jamais incluse dans une réponse d'erreur.
 
