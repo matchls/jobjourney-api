@@ -7,6 +7,7 @@
     "test": "tsx --test src/**/*.test.ts",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "lint": "eslint .",
     "start": "node dist/server.js",
     "agent-key:create": "tsx src/scripts/create-agent-api-key.ts"
   },
@@ -26,13 +27,16 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.9.2",
+    "eslint": "^9.39.5",
     "tsx": "^4.22.4",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0"
   }
 }

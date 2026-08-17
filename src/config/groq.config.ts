@@ -27,8 +27,6 @@ export const getGroqApiKey = (): string | undefined => {
   return key ? key : undefined;
 };
 
-export const isGroqConfigured = (): boolean => getGroqApiKey() !== undefined;
-
 export const getGroqBaseUrl = (): string =>
   process.env.GROQ_BASE_URL?.trim() || DEFAULT_BASE_URL;
 
