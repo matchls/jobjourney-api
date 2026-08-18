@@ -3,6 +3,7 @@ import prisma from "../config/prisma";
 import { CreateAgentApplicationInput } from "../validators/agent-application.validator";
 import { computeAgentDedupKey, computeRequestHash } from "../utils/agent-dedup";
 import { findApplicationMatchingDedupKey } from "./application-dedup-lookup.service";
+import { runWithSerializationRetry } from "../utils/serializable-retry";
 
 export interface AgentImportContext {
   userId: string;
@@ -30,15 +31,6 @@ const isUniqueConstraintError = (error: unknown): boolean =>
   error instanceof Prisma.PrismaClientKnownRequestError &&
   error.code === "P2002";
 
-// Postgres reports a serialization failure (SQLSTATE 40001) when two
-// SERIALIZABLE transactions overlap in a way that couldn't happen in any
-// serial ordering; Prisma surfaces it as P2034.
-const isSerializationFailure = (error: unknown): boolean =>
-  error instanceof Prisma.PrismaClientKnownRequestError &&
-  error.code === "P2034";
-
-const MAX_SERIALIZATION_RETRIES = 3;
-
 // The dedup pre-check (findApplicationMatchingDedupKey) scans ALL of a
 // user's applications rather than looking up a single indexed
 // agentDedupKey — necessary for the mixed URL/fallback rule, since a
@@ -53,26 +45,21 @@ const MAX_SERIALIZATION_RETRIES = 3;
 // silently letting both commit. Retrying re-runs the callback from scratch:
 // on the retry, the pre-check sees whatever the winning transaction just
 // committed and correctly resolves to a duplicate rather than racing again.
-const runInSerializableTransaction = async <T>(
+// Retrying is not optional comfort here, and it is not only the "cross-shaped"
+// race above that triggers it: because the pre-check reads the user's rows
+// with a filter Postgres serves by sequential scan while the table is small,
+// SSI takes a predicate lock covering the whole relation, so a concurrent
+// INSERT into Application by an unrelated user can abort this transaction
+// too. Those conflicts are false positives with respect to this request and
+// clear as soon as it runs again.
+const runInSerializableTransaction = <T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
-): Promise<T> => {
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= MAX_SERIALIZATION_RETRIES; attempt += 1) {
-    try {
-      return await prisma.$transaction(fn, {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      });
-    } catch (error) {
-      if (!isSerializationFailure(error)) {
-        throw error;
-      }
-      lastError = error;
-    }
-  }
-
-  throw lastError;
-};
+): Promise<T> =>
+  runWithSerializationRetry(() =>
+    prisma.$transaction(fn, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    }),
+  );
 
 // Only stores what an operator reviewing an import would need: the stack the
 // agent detected, its synthesis, its confidence score/breakdown. Never the

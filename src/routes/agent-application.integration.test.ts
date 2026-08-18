@@ -265,6 +265,13 @@ describe("POST /agent/applications", () => {
       postApplication(fullKey, payload, "key-15"),
     ]);
     const [aBody, bBody] = await Promise.all([a.json(), b.json()]);
+
+    assert.notEqual(a.status, 500, JSON.stringify(aBody));
+    assert.notEqual(b.status, 500, JSON.stringify(bBody));
+    assert.ok([200, 201].includes(a.status));
+    assert.ok([200, 201].includes(b.status));
+
+    assert.ok(aBody.applicationId);
     assert.equal(aBody.applicationId, bBody.applicationId);
 
     const count = await prisma.application.count({
@@ -273,6 +280,10 @@ describe("POST /agent/applications", () => {
     assert.equal(count, 1);
   });
 
+  // Two genuinely simultaneous imports of the same job under different
+  // Idempotency-Keys. The loser's SERIALIZABLE transaction is expected to be
+  // aborted by Postgres — that abort is normal and recoverable, so it must be
+  // retried internally and never surface as a 500 with no applicationId.
   test("concurrent requests with the same dedup fingerprint create only one application", async () => {
     const { fullKey } = await createApiKey();
     const offerUrl = "https://example.com/jobs/concurrent-fingerprint";
@@ -282,10 +293,38 @@ describe("POST /agent/applications", () => {
       postApplication(fullKey, { company: "Race Co", position: "Engineer", offerUrl }, "key-17"),
     ]);
     const [aBody, bBody] = await Promise.all([a.json(), b.json()]);
+
+    // No serialization conflict may leak out as an accidental server error.
+    assert.notEqual(a.status, 500, JSON.stringify(aBody));
+    assert.notEqual(b.status, 500, JSON.stringify(bBody));
+
+    // One request creates, the other is told it is a duplicate — in whichever
+    // order the two transactions happen to resolve.
+    const statuses = [a.status, b.status].sort();
+    assert.deepEqual(statuses, [200, 201]);
+
+    const created = a.status === 201 ? aBody : bBody;
+    const duplicate = a.status === 201 ? bBody : aBody;
+
+    assert.equal(created.status, "created");
+    assert.equal(created.duplicate, false);
+    assert.equal(duplicate.status, "duplicate");
+    assert.equal(duplicate.duplicate, true);
+
+    // Both responses must point the caller at the one real application.
+    assert.ok(aBody.applicationId, "first response carries an applicationId");
+    assert.ok(bBody.applicationId, "second response carries an applicationId");
     assert.equal(aBody.applicationId, bBody.applicationId);
 
     const count = await prisma.application.count({ where: { userId, company: "Race Co" } });
     assert.equal(count, 1);
+
+    // The duplicate request still gets its own receipt, so replaying either
+    // Idempotency-Key stays idempotent afterwards.
+    const receipts = await prisma.agentImportReceipt.count({
+      where: { userId, applicationId: aBody.applicationId },
+    });
+    assert.equal(receipts, 2);
   });
 
   test("never logs the bearer secret, the full key, or the secret hash", async () => {
@@ -579,6 +618,10 @@ describe("POST /agent/applications", () => {
       withoutUrl.json(),
     ]);
 
+    assert.notEqual(withUrl.status, 500, JSON.stringify(withUrlBody));
+    assert.notEqual(withoutUrl.status, 500, JSON.stringify(withoutUrlBody));
+    assert.ok(withUrlBody.applicationId, "URL side carries an applicationId");
+    assert.ok(withoutUrlBody.applicationId, "URL-less side carries an applicationId");
     assert.equal(withUrlBody.applicationId, withoutUrlBody.applicationId);
 
     const count = await prisma.application.count({ where: { userId, company } });
