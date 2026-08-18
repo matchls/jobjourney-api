@@ -1,0 +1,100 @@
+# Vérifie automatiquement l'API à chaque PR vers main et à chaque push sur main.
+#
+# Jusqu'ici, lint, build et tests n'étaient lancés qu'en local : aucun statut
+# n'était attaché au commit, donc rien n'empêchait de valider une PR sans les
+# avoir exécutés. Ce workflow rend ces trois contrôles visibles sur GitHub.
+
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+# Moindre privilège : la CI lit le dépôt, et rien d'autre. Elle ne pousse aucun
+# commit, ne crée aucune release et ne modifie aucune PR.
+permissions:
+  contents: read
+
+# Un nouveau push sur une branche annule le run encore en cours pour cette même
+# branche : inutile de continuer à tester un commit déjà remplacé.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, build et tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Les tests d'intégration de ce dépôt travaillent sur une vraie base
+    # PostgreSQL (créations et suppressions réelles via Prisma). Ce service
+    # fournit une base jetable, créée pour ce job et détruite avec lui : la base
+    # Neon de développement et celle de production ne sont jamais touchées.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          # Identifiants factices, valables uniquement dans ce conteneur
+          # éphémère. Ils ne donnent accès à rien d'autre.
+          POSTGRES_USER: jobjourney_ci
+          POSTGRES_PASSWORD: jobjourney_ci_password
+          POSTGRES_DB: jobjourney_ci
+        ports:
+          - 5432:5432
+        # Sans ce contrôle de santé, les étapes démarreraient avant que
+        # PostgreSQL accepte les connexions, et les migrations échoueraient.
+        # -U et -d sont explicites : sans eux, pg_isready interroge la base avec
+        # l'utilisateur système du conteneur (root), qui n'existe pas côté
+        # PostgreSQL — le check finit par passer, mais chaque tentative laisse
+        # un FATAL: role "root" does not exist dans les logs du service.
+        options: >-
+          --health-cmd "pg_isready -U jobjourney_ci -d jobjourney_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Aucun secret GitHub n'est nécessaire : ces deux valeurs sont des
+      # constantes de test, sans effet en dehors de ce job.
+      DATABASE_URL: postgresql://jobjourney_ci:jobjourney_ci_password@localhost:5432/jobjourney_ci
+      JWT_SECRET: ci-only-jwt-secret-not-a-real-secret
+      # GROQ_API_KEY est volontairement absente. Les tests d'extraction
+      # injectent un double du fournisseur et n'appellent jamais Groq ; certains
+      # vérifient même le 503 renvoyé quand la clé manque, ce que la définir
+      # ferait échouer.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          # Même version majeure LTS que l'environnement de développement.
+          node-version: 22
+          cache: npm
+
+      # npm ci et non npm install : installation reproductible, strictement
+      # conforme à package-lock.json.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # Applique les migrations existantes à la base jetable. migrate deploy
+      # n'en crée aucune et ne modifie pas le schéma : il rejoue seulement
+      # celles déjà versionnées dans prisma/migrations.
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
+      - name: Test
+        run: npm test
